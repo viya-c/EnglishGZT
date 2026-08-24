@@ -2866,6 +2866,36 @@ function readSched() {
   }).filter(s => s.weekday != null && s.weekday >= 0 && s.weekday <= 6 && s.start);
 }
 
+/** 保存/编辑课包后，把关联的「课外辅导」课程与课包每周安排完全同步：
+ *  - 课包里有的星期：已有课程更新上课时间，没有则自动新建一门关联课程
+ *  - 课包里去掉的星期：删除对应的关联课程（保持双向一致） */
+async function syncPkgTutorCourses(pkgId, sched, durationMin, meta) {
+  const linked = (S.data.courses || []).filter(c => c.packageId === pkgId && c.type === 'tutor');
+  const schedDays = sched.map(s => Number(s.weekday));
+  const ops = [];
+  for (const slot of sched) {
+    const wd = Number(slot.weekday);
+    const end = slot.end || endFromStart(slot.start, durationMin);
+    const exist = linked.find(c => Number(c.weekday) === wd);
+    if (exist) {
+      if (exist.startTime !== slot.start || exist.endTime !== end)
+        ops.push(api('/courses/' + exist.id, { method: 'PUT', body: { startTime: slot.start, endTime: end } }));
+    } else {
+      ops.push(api('/courses', { method: 'POST', body: {
+        gradeId: gid(), type: 'tutor',
+        subject: meta.subject, name: meta.name,
+        teacher: meta.teacher, location: meta.org, teacherContact: meta.teacherContact,
+        weekType: 'all', termId: null, note: '',
+        startTime: slot.start, endTime: end, packageId: pkgId, periodIdx: null
+      } }));
+    }
+  }
+  for (const c of linked) {
+    if (schedDays.indexOf(Number(c.weekday)) < 0) ops.push(api('/courses/' + c.id, { method: 'DELETE' }));
+  }
+  if (ops.length) await Promise.all(ops);
+}
+
 /** 客户端依据「总课时 + 每次课时数 + 开课日 + 每周固定安排」推算预计结课日 */
 function projectEndDateUI() {
   const sched = readSched();
@@ -2976,9 +3006,8 @@ function pkgForm(id) {
             pkgId = r.data.id;
             await api(`/packages/${r.data.id}/generate`, { method: 'POST' });
           }
-          // 同步关联课表课程的结束时间 = 开始时间 + 上课时长
-          await Promise.all(S.data.courses.filter(c => c.packageId === pkgId && c.startTime).map(c =>
-            api('/courses/' + c.id, { method: 'PUT', body: { endTime: minToHM(toMin(c.startTime) + durationMin) } })));
+          // 同步关联课外辅导课程：星期 + 上课时间 与课包每周安排完全一致
+          await syncPkgTutorCourses(pkgId, sched, durationMin, { subject: body.subject, name: body.name, teacher: body.teacher, org: body.org, teacherContact: body.teacherContact });
           await refresh(); closeSheet(); toast('已保存 🎉');
         } catch (e) { toast(e.message); }
       };
