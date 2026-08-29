@@ -218,6 +218,45 @@ font-weight:600;color:var(--sub);min-height:40px;white-space:nowrap}
 .dlg.b .dbub{background:var(--pril)}
 .den{font-size:15px;line-height:1.65;letter-spacing:.1px}
 .dzh{font-size:13px;color:var(--sub);margin-top:6px;padding-top:6px;border-top:1px dashed var(--bd);line-height:1.6}
+/* ---- 精学四阶 ---- */
+.steps{display:flex;gap:5px;margin-bottom:11px}
+.step{flex:1;background:#fff;border:1px solid var(--bd);border-radius:11px;padding:7px 2px 6px;text-align:center;cursor:pointer;transition:.15s;position:relative;overflow:hidden}
+.step i{display:block;font-style:normal;font-size:13px;font-weight:800;color:var(--sub);line-height:1.3}
+.step span{display:block;font-size:10.5px;color:var(--sub);margin-top:1px;font-weight:600}
+.step.on{background:var(--pri);border-color:var(--pri)}
+.step.on i,.step.on span{color:#fff}
+.step.done{background:var(--sucl);border-color:#bfe5cf}
+.step.done i{color:var(--suc)}
+.step.done span{color:var(--suc)}
+.step.done.on{background:var(--pri);border-color:var(--pri)}
+.step.done.on i,.step.done.on span{color:#fff}
+.dpcard{background:#fff;border-radius:var(--r);padding:13px;box-shadow:var(--sh);margin-bottom:10px}
+.dphead{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.dphead b{font-size:14px}
+.dphead .pill{margin-left:auto}
+.dphint{font-size:12px;color:var(--sub);line-height:1.65;margin-bottom:10px}
+.dpin{width:100%;min-height:74px;border:1px solid var(--bd);border-radius:10px;padding:9px 10px;font-size:14.5px;line-height:1.6;font-family:inherit;resize:vertical;outline:none;background:#fcfdff}
+.dpin:focus{border-color:var(--pri);background:#fff}
+.dprow{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.dpsent{font-size:15.5px;line-height:1.7;padding:11px 12px;background:#f7f9fc;border-radius:10px;border:1px solid var(--bd2)}
+.dpsent.zh{font-size:14.5px;color:var(--txt)}
+/* 词级比对结果 */
+.df-ok{color:var(--txt)}
+.df-no{color:var(--dan);text-decoration:line-through;text-decoration-thickness:1.5px;background:var(--danl);border-radius:3px;padding:0 2px}
+.df-miss{color:var(--suc);font-weight:700;background:var(--sucl);border-radius:3px;padding:0 2px}
+.dfstat{display:flex;align-items:center;gap:9px;margin:10px 0 2px}
+.dfstat .num{font-size:22px;font-weight:800;line-height:1}
+.dfstat .pl{flex:1;height:7px;background:var(--bd2);border-radius:4px;overflow:hidden}
+.dfstat .pl i{display:block;height:100%;border-radius:4px;transition:width .3s}
+.dpmiss{font-size:12px;color:var(--dan);margin-top:7px;line-height:1.6}
+/* 遮蔽背诵 */
+.shd{font-size:17px;line-height:2.05;letter-spacing:.6px;word-break:break-word}
+.shd .blk{display:inline-block;min-width:34px;border-bottom:2px solid var(--pri);color:transparent;text-align:center;margin:0 1px}
+.shd .blk.half{color:var(--sub);border-bottom-style:dashed}
+.shdlv{display:flex;gap:5px;margin-top:10px}
+.shdlv button{flex:1;font-size:11.5px}
+.shdtimer{font-size:12px;color:var(--sub);text-align:center;margin-top:9px}
+.deepdone{background:var(--sucl);border:1px solid #bfe5cf;border-radius:11px;padding:11px 12px;text-align:center;color:var(--suc);font-weight:700;font-size:13.5px;margin-bottom:10px}
 .dzh.hide{display:none}
 .dbtns{display:flex;gap:6px;margin-top:8px}
 .mini{display:inline-flex;align-items:center;justify-content:center;gap:4px;font-size:12.5px;color:var(--pri);
@@ -1800,6 +1839,7 @@ var COURSE=[
 
 /* ---------------- 状态 ---------------- */
 var S=null,curUnit=null,curTab='dlg',quizAns={},quizDone=false,readAns={},vtAns={},vtDone=false,vtQs=[],vtUnit='';
+var deepTab='read',deepRec=null,deepRecOn=false,deepTimer=null,deepT0=0;
 var spkState={unit:null,idx:0,scores:[],rec:null,recording:false};
 
 function today(){var d=new Date();return fmt(d)}
@@ -1815,6 +1855,7 @@ function defaults(){
   return {
     goal:{name:'日常职场场景无障碍交流',date:addD(t,100),dailyMin:25,dailyUnits:1,start:t},
     prog:{},words:{},tasks:[],checkin:{},quizLog:[],spkLog:[],read:{},hl:{},
+    deep:{},deepLog:[],deepMile:0,
     set:{rate:0.85,autoScore:true,showZh:true},
     seeded:false,created:t
   };
@@ -1826,6 +1867,49 @@ function load(){
   for(var k2 in d.set){if(S.set[k2]===undefined)S.set[k2]=d.set[k2]}
 }
 function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){toast('存储空间不足，请导出备份后清理')}}
+
+/* ---------------- 精学四阶状态（听写/精读/回译/背诵） ---------------- */
+var DEEP_KEYS=['dict','read','retro','shadow','deepDone','dictIdx','retroIdx','shadowIdx'];
+function deepOf(id){
+  if(!S.deep)S.deep={};
+  var d=S.deep[id];
+  if(!d||typeof d!=='object')d=S.deep[id]={};
+  DEEP_KEYS.forEach(function(k){if(typeof d[k]!=='number')d[k]=0});
+  if(typeof d.ts!=='string')d.ts='';
+  if(!d.dictHit||typeof d.dictHit!=='object')d.dictHit={};
+  if(!d.retroHit||typeof d.retroHit!=='object')d.retroHit={};
+  if(!d.shadowHit||typeof d.shadowHit!=='object')d.shadowHit={};
+  return d;
+}
+/* 已完成完整精学闭环的单元数 */
+function deepCount(){var n=0;for(var k in (S.deep||{})){if(S.deep[k]&&S.deep[k].deepDone)n++}return n}
+/* 某单元四阶完成度 0-4 */
+function deepStep(id){var d=deepOf(id);return (d.dict?1:0)+(d.read?1:0)+(d.retro?1:0)+(d.shadow?1:0)}
+/* 标记某一阶完成；四阶全绿则置 deepDone 并触发里程碑 */
+function markDeep(key,val){
+  var d=deepOf(curUnit.id);
+  d[key]=val==null?1:val;
+  if(d.dict&&d.read&&d.retro&&d.shadow&&!d.deepDone){
+    d.deepDone=1;d.ts=today();
+    if(S.deepLog)S.deepLog.push({u:curUnit.id,d:today()});
+    save();
+    var n=deepCount();
+    if(n>0&&n%10===0&&S.deepMile<n){
+      S.deepMile=n;save();
+      toast('🔥 第 '+n+' 篇精学达成！十篇定律：耳朵打开、嘴巴跟上');
+    }else{
+      toast('🎉 本篇四阶精学完成（累计 '+n+' 篇）');
+    }
+    return true;
+  }
+  save();
+  return false;
+}
+/* 听写/回译单句记分：idx 句命中率 */
+function setDeepHit(field,idx,score){
+  var d=deepOf(curUnit.id);
+  d[field][idx]=score;save();
+}
 
 /* 预置示例数据（含 1 条逾期） */
 function seed(){
@@ -2118,6 +2202,8 @@ function renderToday(){
   h+='<div class="card"><div class="ch"><h2>'+svg(I.fire)+'学习打卡</h2>'+
       '<button class="act" onclick="checkIn()">'+(S.checkin[t]?'再 +10 分钟':'今日打卡')+'</button></div>'+
       '<div class="hint">连续 '+streak+' 天 · 本周累计 '+weekMin()+' 分钟 · <b>累计 '+totalMin()+' 分钟（约 '+(Math.round(totalMin()/60*10)/10)+' 小时）</b> · 目标每天 '+S.goal.dailyMin+' 分钟</div>'+
+      '<div class="hint" style="margin-top:5px">🎯 精学四阶已榨干 <b style="color:var(--pri)">'+deepCount()+'</b> 篇'+
+        (deepCount()>=10?' · <b style="color:var(--suc)">已过十篇质变线</b>':' · 再 '+(10-deepCount()%10)+' 篇触发「十篇定律」质变')+'</div>'+
       '<div class="streak">'+last7().map(function(d){
         var m=S.checkin[d.k]||0,cls=m>=S.goal.dailyMin?'on':m>0?'half':'';
         return '<div class="sd"><i class="'+cls+(d.k===t?' today':'')+'"></i><span>'+d.n+'</span></div>'}).join('')+'</div>'+
@@ -2150,23 +2236,26 @@ function modStatus(m){
   var allU=uu.length>0&&uu.every(function(u){var p=S.prog[u.id]||{};return p.quizDone&&(p.spkBest>0);});
   var rd=m.rd||[];
   var allR=rd.length===0||rd.every(function(r){return S.read[r.id]&&S.read[r.id].done;});
-  return {started:started,complete:allU&&allR};
+  var deepN=uu.filter(function(u){return S.deep&&S.deep[u.id]&&S.deep[u.id].deepDone}).length;
+  var deepComplete=uu.length>0&&deepN===uu.length;
+  return {started:started,complete:allU&&allR,deepComplete:deepComplete,deepN:deepN,totalN:uu.length};
 }
 function firstUnitId(m){var uu=(m.units||[]).slice().sort(function(a,b){return a.lv-b.lv});return uu[0]?uu[0].id:'';}
 function firstUnfinId(m){var uu=(m.units||[]).slice().sort(function(a,b){return a.lv-b.lv});for(var i=0;i<uu.length;i++){var p=S.prog[uu[i].id]||{};if(!p.quizDone)return uu[i].id;}return uu[0]?uu[0].id:'';}
 function renderCourse(){
-  var us=allUnits(),done=us.filter(function(u){return S.prog[u.id]&&S.prog[u.id].studied}).length;
+  var us=allUnits(),done=us.filter(function(u){return S.prog[u.id]&&S.prog[u.id].studied}).length,dc=deepCount();
   var allRd=COURSE.reduce(function(a,m){return a+(m.rd?m.rd.length:0)},0);
   var rdDone=allRd?Object.keys(S.read).filter(function(k){return S.read[k]&&S.read[k].done}).length:0;
   var h='<div class="card tight"><div class="ch" style="margin-bottom:6px"><h2>'+svg(I.book)+'HR 模块学习路径</h2></div>'+
-    '<div class="hint">共 '+us.length+' 个单元 + '+allRd+' 篇阅读。按你自己的节奏、<b>任意顺序</b>学即可；每单元建议路径：<b>对话 → 阅读 → 词汇 → 长难句 → 成果测试 → 口语跟读</b>，模块内按 L1→L3 难度递进。已学 '+done+'/'+us.length+' 单元，阅读 '+rdDone+'/'+allRd+' 篇。</div></div>';
+    '<div class="hint">共 '+us.length+' 个单元 + '+allRd+' 篇阅读。按你自己的节奏、<b>任意顺序</b>学即可；每单元建议路径：<b>对话 → 阅读 → 词汇 → 长难句 → 成果测试 → 口语跟读</b>，模块内按 L1→L3 难度递进。<b>已学 '+done+'/'+us.length+'</b> 单元 · <b style="color:var(--pri)">精学 '+dc+'/'+us.length+'</b> 篇 · 阅读 '+rdDone+'/'+allRd+' 篇。</div></div>';
 
   COURSE.forEach(function(m){
     var uu=m.units.slice().sort(function(a,b){return a.lv-b.lv});
     var dn=uu.filter(function(u){return S.prog[u.id]&&S.prog[u.id].studied}).length;
     var ms=modStatus(m);
     var pill;
-    if(ms.complete)pill='<button class="mpill end" onclick="openUnit(\''+firstUnitId(m)+'\')">结束学习</button>';
+    if(ms.deepComplete)pill='<button class="mpill end" onclick="openUnit(\''+firstUnitId(m)+'\')">结束学习</button>';
+    else if(ms.complete)pill='<button class="mpill doing" onclick="openUnit(\''+firstUnfinId(m)+'\')">巩固中</button>';
     else if(ms.started)pill='<button class="mpill doing" onclick="openUnit(\''+firstUnfinId(m)+'\')">学习中</button>';
     else pill='<button class="mpill start" onclick="openUnit(\''+firstUnitId(m)+'\')">开始学习</button>';
     h+='<div class="mod"><div class="modh"><div class="modi">'+m.icon+'</div>'+
@@ -2180,7 +2269,8 @@ function renderCourse(){
       h+='<button class="punit '+st+'" onclick="openUnit(\''+u.id+'\')">'+
         '<div class="pdot"></div>'+
         '<div class="plv v'+u.lv+'">L'+u.lv+'</div>'+
-        '<div class="pinfo"><b>'+u.en+'</b><span>'+u.t+' · '+u.voc.length+'词 · '+u.qz.length+'题</span></div>';
+        '<div class="pinfo"><b>'+u.en+'</b><span>'+u.t+' · '+u.voc.length+'词'+
+          (deepOf(u.id).deepDone?' · <b style="color:var(--suc)">精学 ✓</b>':(deepStep(u.id)>0?' · 精学 '+deepStep(u.id)+'/4':''))+'</span></div>';
       if(p.quizDone)h+='<div class="pscore"><b>'+p.quizBest+'</b><small>分</small></div>';
       else if(p.studied)h+='<div class="pscore"><span class="pill blue">已学</span></div>';
       h+='</button>'+(idx<uu.length-1?'<div class="pline"></div>':'');
@@ -2193,7 +2283,7 @@ function renderCourse(){
 /* ---------------- 单元详情 ---------------- */
 function openUnit(id,tab){
   curUnit=findUnit(id);if(!curUnit)return;
-  curTab=tab||'dlg';
+  curTab=tab||'dlg';deepReset();deepTab=(tab==='dlg'?'read':deepTab);
   var pp=S.prog[curUnit.id]||{};
   if(pp.quizDone){quizAns=pp.quizAns?Object.assign({},pp.quizAns):{};quizDone=true;}
   else{quizAns={};quizDone=false;}
@@ -2218,23 +2308,15 @@ document.getElementById('upTabs').addEventListener('click',function(e){
 function renderUnit(){
   var u=curUnit,h='';
   var _m=COURSE.find(function(m){return m.id===u.modId})||{};
-  if(modStatus(_m).complete)h+='<div class="revbanner">🔄 复习模式 · 本模块已全部完成，可重做任意环节巩固</div>';
+  var _ms=modStatus(_m);
+  if(_ms.complete)h+='<div class="revbanner">🔄 复习模式 · 本模块已全部完成，可重做任意环节巩固'+
+    (_ms.deepComplete?'（含全部精学四阶）':'（未做精学四阶的单元可继续攻坚）')+'</div>';
   if(curTab==='dlg'){
-    h+='<div class="scene"><b>场景说明</b>'+u.scene+'</div>';
-    h+='<div class="toolbar">'+
-      '<button class="mini" onclick="playAll(this)">'+svg(I.play,'s')+'连续播放全文</button>'+
-      '<button class="mini g" onclick="stopSpeak()">停止</button>'+
-      '<button class="mini g" onclick="toggleZh(this)">'+svg(I.eye,'s')+(S.set.showZh?'隐藏中文':'显示中文')+'</button>'+
-      '<button class="mini g" onclick="openSpk(\''+u.id+'\')">'+svg(I.mic,'s')+'去跟读测评</button></div>';
-    u.dlg.forEach(function(d,i){
-      h+='<div class="dlg'+(d.b?' b':'')+'"><div class="dspk">'+esc(d.s)+'</div><div class="dbub">'+
-        '<div class="den hl-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(d.en,u.voc)+'</div>'+
-        '<div class="dzh'+(S.set.showZh?'':' hide')+'">'+esc(d.zh)+'</div>'+
-        '<div class="dbtns"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(d.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
-        '<button class="mini g" onclick="speakSlow(this)" data-x="'+esc(d.en)+'">0.6x 精听</button>'+
-        '<button class="mini g" onclick="parseSentence(\''+escJs(d.en)+'\',\''+escJs(d.zh)+'\',curUnit.voc,null)">🔍 解析</button></div></div></div>';
-    });
-    h+='<button class="btn full" style="margin-top:6px" onclick="markStudied()">'+svg(I.check,'s')+'学完了，去读拓展阅读</button>';
+    h+=deepSteps(u);
+    if(deepTab==='dict')h+=deepDict(u);
+    else if(deepTab==='retro')h+=deepRetro(u);
+    else if(deepTab==='shadow')h+=deepShadow(u);
+    else h+=deepRead(u);
   }
   else if(curTab==='voc'){
     h+='<div class="hint" style="margin-bottom:11px">点 <b>☆ 收藏</b> 把词收进「我的词库」；点 <b>标不认识</b> 安排今天复习。系统按 <b>1/2/4/7/15 天</b> 艾宾浩斯间隔提醒。对话和长难句里的词也可直接点。</div>';
@@ -2368,6 +2450,215 @@ function renderUnit(){
   }
   document.getElementById('upBody').innerHTML=h;
   applyHl();
+}
+/* ================= 精学四阶（尚雯婕法） ================= */
+var DEEP_TAB=[['dict','①','听写'],['read','②','精读'],['retro','③','回译'],['shadow','④','背诵']];
+var dictView={checked:false,res:null,val:''},retroView={checked:false,res:null,val:''};
+var shadowView={lv:0,t0:0,elapsed:0,on:false,show:false};
+function deepSet(u){return (u.spk&&u.spk.length)?u.spk:u.dlg.map(function(_,i){return i})}
+function deepReset(){dictView={checked:false,res:null,val:''};retroView={checked:false,res:null,val:''};shadowView={lv:0,t0:0,elapsed:0,on:false,show:false}}
+function deepSteps(u){
+  var d=deepOf(u.id),h='<div class="steps">';
+  DEEP_TAB.forEach(function(x){
+    var dn=d[x[0]]?' done':'',on=deepTab===x[0]?' on':'';
+    h+='<button class="step'+dn+on+'" onclick="switchDeep(\''+x[0]+'\')"><i>'+(d[x[0]]?'✓':x[1])+'</i><span>'+x[2]+'</span></button>';
+  });
+  h+='</div>';
+  if(d.deepDone)h+='<div class="deepdone">✓ 本篇四阶精学已完成 · '+d.ts+'</div>';
+  else h+='<div class="dphint">尚雯婕精学法：同一篇材料<b>榨干四遍</b>——盲听听写 → 对照精读 → 回译输出 → 同速背诵。四阶全绿计 1 篇精学，<b>累计 10 篇触发质变</b>。</div>';
+  return h;
+}
+function switchDeep(t){stopSpeak();deepTab=t;renderUnit();document.getElementById('upBody').scrollTop=0;}
+function deepDots(set,idx){
+  return '<div class="spkprog">'+set.map(function(_,i){return '<i class="'+(i<idx?'done':i===idx?'on':'')+'"></i>'}).join('')+'</div>';
+}
+/* 词级比对着色 */
+function diffHtml(ref,marks){
+  return normWords(ref).map(function(w,i){
+    return marks[i]?'<span class="df-ok">'+esc(w)+'</span>':'<span class="df-no">'+esc(w)+'</span>';
+  }).join(' ');
+}
+function diffStat(r){
+  var col=r.score>=85?'var(--suc)':r.score>=60?'var(--wrn)':'var(--dan)';
+  return '<div class="dfstat"><div class="num" style="color:'+col+'">'+r.score+'</div>'+
+    '<div class="pl"><i style="width:'+r.score+'%;background:'+col+'"></i></div>'+
+    '<div style="font-size:12px;color:var(--sub)">命中 '+r.hit+'/'+r.total+' 词</div></div>';
+}
+/* ---- ② 精读（原对话视图） ---- */
+function deepRead(u){
+  var d=deepOf(u.id);
+  var h='<div class="scene"><b>场景说明</b>'+u.scene+'</div>';
+  h+='<div class="toolbar">'+
+    '<button class="mini" onclick="playAll(this)">'+svg(I.play,'s')+'连续播放全文</button>'+
+    '<button class="mini g" onclick="stopSpeak()">停止</button>'+
+    '<button class="mini g" onclick="toggleZh(this)">'+svg(I.eye,'s')+(S.set.showZh?'隐藏中文':'显示中文')+'</button>'+
+    '<button class="mini g" onclick="openSpk(\''+u.id+'\')">'+svg(I.mic,'s')+'去跟读测评</button></div>';
+  u.dlg.forEach(function(dd,i){
+    h+='<div class="dlg'+(dd.b?' b':'')+'"><div class="dspk">'+esc(dd.s)+'</div><div class="dbub">'+
+      '<div class="den hl-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(dd.en,u.voc)+'</div>'+
+      '<div class="dzh'+(S.set.showZh?'':' hide')+'">'+esc(dd.zh)+'</div>'+
+      '<div class="dbtns"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
+      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.6)" data-x="'+esc(dd.en)+'">0.6x 精听</button>'+
+      '<button class="mini g" onclick="parseSentence(\''+escJs(dd.en)+'\',\''+escJs(dd.zh)+'\',curUnit.voc,null)">🔍 解析</button></div></div></div>';
+  });
+  if(d.read)h+='<div class="deepdone">✓ 精读阶已完成</div>';
+  else h+='<button class="btn full" style="margin-top:6px" onclick="markDeep(\'read\');renderUnit()">'+svg(I.check,'s')+'吃透了，标记精读完成</button>';
+  h+='<button class="btn full '+(d.read?'':'out')+'" style="margin-top:8px" onclick="markStudied()">学完了，去读拓展阅读</button>';
+  return h;
+}
+/* ---- ① 听写 ---- */
+function deepDict(u){
+  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.dictIdx,set.length-1),dd=u.dlg[set[idx]];
+  var h='<div class="dpcard"><div class="dphead"><b>① 盲听听写</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
+    '<div class="dphint">不看原文，反复听这句，把听到的写下来。听不出先按发音拼，写完再核对——<b>这是整条方法里最硬的一环</b>。</div>'+
+    deepDots(set,idx)+
+    '<div class="dphint" style="margin-top:9px">说话人：'+esc(dd.s)+'</div>'+
+    '<div class="dprow">'+
+      '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'正常速</button>'+
+      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.8)" data-x="'+esc(dd.en)+'">0.8x</button>'+
+      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.6)" data-x="'+esc(dd.en)+'">0.6x 慢速</button>'+
+      '<button class="mini g" onclick="dictReveal()">'+svg(I.eye,'s')+'看原文</button></div>';
+  if(!dictView.checked){
+    h+='<textarea class="dpin" id="dictIn" style="margin-top:10px" placeholder="把你听到的写在这里…（忽略大小写和标点）">'+esc(dictView.val||'')+'</textarea>'+
+      '<div class="dprow"><button class="btn" style="flex:1" onclick="dictCheck()">'+svg(I.check,'s')+'核对</button></div>';
+  }else{
+    var r=dictView.res||{score:0,marks:[],hit:0,total:0};
+    h+=diffStat(r)+
+      '<div class="dpsent" style="margin-top:8px">'+diffHtml(dd.en,r.marks)+'</div>'+
+      '<div class="dpsent" style="margin-top:6px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">正确原文</b><br>'+esc(dd.en)+'</div>'+
+      '<div class="dpsent zh" style="margin-top:6px">'+esc(dd.zh)+'</div>';
+    if(r.score<100)h+='<div class="dpmiss">标红删除线 = 没听出来或写错的词。回 0.6x 再听两遍，重点抓<b>连读和弱读</b>。</div>';
+    h+='<div class="dprow">'+
+      '<button class="btn out" style="flex:1" onclick="dictAgain()">再听写一遍</button>'+
+      '<button class="btn" style="flex:1" onclick="dictNext()">'+(idx>=set.length-1?'完成听写阶':'下一句')+'</button></div>';
+  }
+  return h+'</div>';
+}
+function dictCheck(){
+  var u=curUnit,d=deepOf(u.id),set=deepSet(u),dd=u.dlg[set[Math.min(d.dictIdx,set.length-1)]];
+  var el=document.getElementById('dictIn');if(!el)return;
+  var v=(el.value||'').trim();
+  if(!v){toast('先写下你听到的内容');return}
+  var r=scoreSpeech(dd.en,v);
+  dictView={checked:true,res:r,val:v};
+  setDeepHit('dictHit',set[Math.min(d.dictIdx,set.length-1)],r.score);
+  renderUnit();
+}
+function dictAgain(){dictView={checked:false,res:null,val:''};renderUnit()}
+function dictReveal(){
+  var u=curUnit,d=deepOf(u.id),set=deepSet(u),dd=u.dlg[set[Math.min(d.dictIdx,set.length-1)]];
+  var m=normWords(dd.en).map(function(){return false});
+  dictView={checked:true,res:{score:0,marks:m,hit:0,total:m.length},val:''};
+  renderUnit();
+}
+function dictNext(){
+  var d=deepOf(curUnit.id),set=deepSet(curUnit);
+  dictView={checked:false,res:null,val:''};
+  if(d.dictIdx>=set.length-1){markDeep('dict');renderUnit();return}
+  d.dictIdx++;save();renderUnit();
+}
+/* ---- ③ 回译 ---- */
+function deepRetro(u){
+  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.retroIdx,set.length-1),dd=u.dlg[set[idx]];
+  var h='<div class="dpcard"><div class="dphead"><b>③ 回译输出</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
+    '<div class="dphint">只看中文，把英文<b>说出来或写出来</b>。回译不要求逐字一致，按<b>实词命中率</b>评分——练的是「用英语表达」，专治看懂却说不出。</div>'+
+    deepDots(set,idx)+
+    '<div class="dpsent zh" style="margin-top:9px;font-size:15.5px">'+esc(dd.zh)+'</div>';
+  if(!retroView.checked){
+    h+='<textarea class="dpin" id="retroIn" style="margin-top:10px" placeholder="写出你的英文…">'+esc(retroView.val||'')+'</textarea>'+
+      '<div class="dprow"><button class="btn" style="flex:1" onclick="retroCheck()">'+svg(I.check,'s')+'对比原文</button>'+
+      '<button class="btn out" onclick="retroReveal()">想不出</button></div>';
+  }else{
+    var r=retroView.res||{score:0,hit:0,total:0};
+    h+=diffStat(r)+
+      '<div class="dpsent" style="margin-top:8px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">参考答案</b><br>'+esc(dd.en)+'</div>';
+    if(retroView.val)h+='<div class="dpsent" style="margin-top:6px"><b style="font-size:11.5px;color:var(--sub)">你的版本</b><br>'+esc(retroView.val)+'</div>';
+    h+='<div class="dpsent zh" style="margin-top:6px">'+esc(dd.zh)+'</div>'+
+      '<div class="dpmiss">命中率看的是<b>实词和句型</b>，冠词介词不同不影响。低于 60% 说明这句的<b>句式</b>还没内化，回去按成分拆一遍。</div>'+
+      '<div class="dprow">'+
+      '<button class="btn out" style="flex:1" onclick="retroAgain()">再译一次</button>'+
+      '<button class="btn" style="flex:1" onclick="retroNext()">'+(idx>=set.length-1?'完成回译阶':'下一句')+'</button></div>';
+  }
+  return h+'</div>';
+}
+function retroCheck(){
+  var d=deepOf(curUnit.id),set=deepSet(curUnit),dd=curUnit.dlg[set[Math.min(d.retroIdx,set.length-1)]];
+  var el=document.getElementById('retroIn');if(!el)return;
+  var v=(el.value||'').trim();
+  if(!v){toast('先写出你的英文');return}
+  var r=scoreSpeech(dd.en,v);
+  retroView={checked:true,res:r,val:v};
+  setDeepHit('retroHit',set[Math.min(d.retroIdx,set.length-1)],r.score);
+  renderUnit();
+}
+function retroReveal(){
+  var dd=curUnit.dlg[deepSet(curUnit)[Math.min(deepOf(curUnit.id).retroIdx,deepSet(curUnit).length-1)]];
+  var m=normWords(dd.en).map(function(){return false});
+  retroView={checked:true,res:{score:0,marks:m,hit:0,total:m.length},val:''};
+  renderUnit();
+}
+function retroAgain(){retroView={checked:false,res:null,val:''};renderUnit()}
+function retroNext(){
+  var d=deepOf(curUnit.id),set=deepSet(curUnit);
+  retroView={checked:false,res:null,val:''};
+  if(d.retroIdx>=set.length-1){markDeep('retro');renderUnit();return}
+  d.retroIdx++;save();renderUnit();
+}
+/* ---- ④ 同速背诵 ---- */
+function shadowHtml(en,lv){
+  var ws=en.split(/\s+/);
+  if(lv===1)return esc(ws[0])+' '+ws.slice(1).map(function(){return '<span class="blk"></span>'}).join(' ');
+  return ws.map(function(w){
+    var core=(w.match(/[A-Za-z']+/)||[''])[0];
+    var hint=(lv===0&&core)?core[0]:'';
+    return '<span class="blk'+(hint?' half':'')+'">'+esc(hint)+'</span>';
+  }).join(' ');
+}
+function deepShadow(u){
+  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.shadowIdx,set.length-1),dd=u.dlg[set[idx]];
+  var ref=Math.max(2,Math.round(normWords(dd.en).length/2.5));
+  var h='<div class="dpcard"><div class="dphead"><b>④ 同速背诵</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
+    '<div class="dphint">遮住英文，跟原音<b>同速</b>复述。尚雯婕心法：<b>速度 = 语感</b>——只有同速才算真正内化。本句参考时长约 <b>'+ref+' 秒</b>。</div>'+
+    deepDots(set,idx);
+  if(shadowView.show){
+    h+='<div class="dpsent" style="margin-top:9px;font-size:15.5px">'+esc(dd.en)+'</div>';
+  }else{
+    h+='<div class="dpsent" style="margin-top:9px"><div class="shd">'+shadowHtml(dd.en,shadowView.lv)+'</div></div>';
+  }
+  h+='<div class="shdlv">'+
+    ['首字母','首词','全遮'].map(function(n,i){
+      return '<button class="mini '+(shadowView.lv===i?'':'g')+'" onclick="shadowLv('+i+')">'+n+'</button>'}).join('')+
+    '</div>'+
+    '<div class="dprow">'+
+    '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'原速播放</button>'+
+    '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.75)" data-x="'+esc(dd.en)+'">0.75x</button>'+
+    '<button class="mini g" onclick="shadowShow()">'+svg(I.eye,'s')+(shadowView.show?'遮回去':'看原文')+'</button></div>';
+  if(!shadowView.on&&!shadowView.elapsed){
+    h+='<div class="dprow"><button class="btn" style="flex:1" onclick="shadowStart()">'+svg(I.mic,'s')+'开始背诵（计时）</button></div>';
+  }else if(shadowView.on){
+    h+='<div class="shdtimer">⏱ 背诵中… 说完点下面结束</div>'+
+      '<div class="dprow"><button class="btn out" style="flex:1" onclick="shadowStop()">我背完了</button></div>';
+  }else{
+    var e=shadowView.elapsed,diff=e-ref,ok=Math.abs(diff)<=ref*0.35;
+    h+='<div class="shdtimer">你用了 <b>'+e.toFixed(1)+'</b> 秒 · 参考 '+ref+' 秒 · '+
+      (ok?'<span style="color:var(--suc)">节奏接近原速 ✓</span>':diff>0?'<span style="color:var(--wrn)">偏慢，再跟一遍找速度</span>':'<span style="color:var(--wrn)">偏快，注意别吞音</span>')+'</div>';
+    h+='<div class="dphint" style="margin-top:10px;text-align:center">给自己打个分：</div>'+
+      '<div class="row wrap" style="justify-content:center">'+
+      [['脱稿流利',95],['基本顺',80],['磕巴',65],['说不出',40]].map(function(x){
+        return '<button class="btn out sm" onclick="shadowScore('+x[1]+')">'+x[0]+'</button>'}).join('')+'</div>';
+  }
+  return h+'</div>';
+}
+function shadowLv(i){shadowView.lv=i;renderUnit()}
+function shadowShow(){shadowView.show=!shadowView.show;renderUnit()}
+function shadowStart(){shadowView.on=true;shadowView.t0=Date.now();renderUnit()}
+function shadowStop(){shadowView.on=false;shadowView.elapsed=(Date.now()-shadowView.t0)/1000;renderUnit()}
+function shadowScore(s){
+  var d=deepOf(curUnit.id),set=deepSet(curUnit);
+  setDeepHit('shadowHit',set[Math.min(d.shadowIdx,set.length-1)],s);
+  shadowView.elapsed=0;
+  if(d.shadowIdx>=set.length-1){markDeep('shadow');renderUnit();return}
+  d.shadowIdx++;save();renderUnit();
 }
 function switchTab(t){
   if(t==='read')readAns={};
