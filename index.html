@@ -1989,7 +1989,10 @@ function saveGoal(){
 function saveSet(){
   S.set.rate=parseFloat(document.getElementById('f_rate').value);
   S.set.autoScore=document.getElementById('f_auto').value==='1';
-  var fv=document.getElementById('f_voice');if(fv)S.set.voiceURI=fv.value;
+  var fv=document.getElementById('f_voice');
+  /* 只有用户真的换了语音才解锁重挑；改语速/音调不该顺带换嗓 */
+  if(fv&&fv.value!==S.set.voiceURI)_voiceLocked=false;
+  if(fv)S.set.voiceURI=fv.value;
   var fp=document.getElementById('f_pitch');if(fp)S.set.pitch=parseFloat(fp.value);
   resetVoice();save();closeSheet();toast('设置已保存')
 }
@@ -2044,15 +2047,36 @@ var synth=window.speechSynthesis,curUtter=null;
    旧实现没处理这点，结果 pick=null 退回系统默认语音（往往是最机械的那个），
    这正是"机器人味"的主因。这里做延迟重试 + voiceschanged 监听。 */
 var _voices=null;
+/* ---- 语音锁定（修"念着念着变声"）------------------------------------
+   浏览器 voices 是异步补齐的，而且云端语音会边用边加载：每加载一个就触发
+   voiceschanged。旧逻辑一看列表变长就 resetVoice() 重挑，于是同一段话前半句
+   一个嗓音、后半句另一个嗓音 —— 这就是"变声"。
+   规则：页面刚打开（还没念过第一句）随便重挑，越挑越好；一旦开念就永久锁死，
+   只有"用户手动改选"或"这个语音从列表里消失了"才允许重挑。 */
+var _voiceLocked=false;
+function voiceAlive(p){
+  if(!p)return false;
+  var vs=enVoices();
+  for(var i=0;i<vs.length;i++)if(vs[i].voiceURI===p.voiceURI)return true;
+  return false;
+}
+function maybeRefreshVoice(force){
+  if(_voiceLocked&&!force)return;                       // 已开念：锁死
+  if(!force&&S.set.voiceURI)return;                     // 用户指定过：不自作主张
+  if(!force&&_pickedVoice&&voiceAlive(_pickedVoice))return;  // 已挑到且仍可用：不动
+  resetVoice();
+}
 function initVoices(){
   if(!synth)return;
-  /* 语音列表是异步补齐的：若后来才加载到更好的语音，必须让已锁定的选择失效重挑，
-     否则"自动挑最自然"会一直卡在第一次拿到的那个（常常是机械的本地语音）。 */
   var grab=function(){
     try{
       var v=synth.getVoices();
-      if(v&&v.length&&(!_voices||v.length>_voices.length)){_voices=v;resetVoice()}
-      else if(v&&v.length)_voices=v;
+      if(v&&v.length){
+        _voices=v;
+        if(_voiceLocked&&_pickedVoice&&voiceAlive(_pickedVoice))return;  // 锁定中且仍在：完全不动
+        if(_pickedVoice&&!voiceAlive(_pickedVoice)){resetVoice();return} // 锁定的那个没了：必须重挑
+        if(!_voiceLocked)maybeRefreshVoice();                            // 未开念：可以挑更好的
+      }
     }catch(e){}
   };
   grab();
@@ -2096,13 +2120,17 @@ function speak(text,btn,cb,rate){
   synth.cancel();
   document.querySelectorAll('.mini.playing').forEach(function(b){b.classList.remove('playing')});
   var u=new SpeechSynthesisUtterance(text);
-  var pick=pickVoice();
+  var pick=pickVoice();_voiceLocked=true;   // 开念即锁定，之后 voiceschanged 不再换嗓
   u.lang=(pick&&pick.lang)||'en-US';
   u.rate=(rate!=null?rate:S.set.rate);
   u.pitch=(S.set.pitch!=null?S.set.pitch:1);
   if(pick)try{u.voice=pick}catch(e){}
   if(btn)btn.classList.add('playing');
-  u.onend=function(){if(btn)btn.classList.remove('playing');if(cb)cb()};
+  var t0=Date.now(),wc=String(text).split(/\s+/).filter(Boolean).length;
+  u.onend=function(){
+    calibBase(Date.now()-t0,wc,u.rate);   // 顺手校准基准语速，让慢放档算得更准
+    if(btn)btn.classList.remove('playing');if(cb)cb()
+  };
   u.onerror=function(){if(btn)btn.classList.remove('playing')};
   curUtter=u;synth.speak(u);
 }
@@ -2137,37 +2165,88 @@ function voiceDiag(){
     (tips.length?'<br>'+tips.join('；'):'（已是当前系统里最自然的一个 ✓）')+'</div>';
 }
 function stopSpeak(){_seqOn=false;if(synth)synth.cancel();document.querySelectorAll('.mini.playing').forEach(function(b){b.classList.remove('playing')})}
-/* 逐词慢放 ------------------------------------------------------------------
-   Chrome 的云端语音（Google US English 等，localService=false）常常直接忽略
-   utterance.rate，导致"0.6x 精听"听上去毫无变化。这里改用拆词 + 间隔的方式
-   放慢节奏——不依赖引擎的 rate 支持，任何语音上都真的能慢下来。 */
+/* 逐段慢放 ------------------------------------------------------------------
+   为什么不能只靠 utterance.rate：Chrome 的云端语音（Google US English 等，
+   localService=false）会直接忽略 rate，于是"0.5x"听起来跟常速一模一样。
+   旧版改成固定间隔（gap=240ms）也不行——那是拍脑袋的常数，跟句子长短、语速
+   设置都无关，实测只慢了三成，用户根本听不出是 0.5 倍速。
+   现在的做法：不赌引擎支不支持 rate，而是【每念完一段就量一次实际时长】，
+   拿"这段按目标倍速应该占多久"减去"实际念了多久"，差多少就在后面补多少静音。
+     · rate 生效（本地语音）：差值≈0，只补一个气口，不会无端拖慢；
+     · rate 被忽略（云端语音）：差值正好补齐，总时长精确落在目标倍速上。
+   两种语音上，0.5x 都真的是 0.5 倍速。 */
 var _seqOn=false,_seqGen=0;
-/* chunk：一次念几个词。1 = 逐词（最慢、最清楚）；3 = 三词一组（更自然）。
-   拆得越碎，间隔带来的"变慢"效果越明显，代价是略显机械。 */
-function speakSeq(text,btn,gap,rate,done,chunk){
+/* rate=1 时"每词几毫秒"。初值 380（≈158 词/分钟），之后每念一次【常速】就用
+   实测值平滑修正一次——不同语音引擎语速差不少，用实测基准算目标时长才准。 */
+var _wpsMs=380;
+/* 用实测修正基准语速。要不要按 rate 换算，取决于引擎类型：
+   本地引擎普遍支持 rate，可以换回 rate=1 的基准；云端引擎常常直接忽略 rate，
+   此时实测值本身就是基准 —— 但万一它其实支持，就会被高估，所以云端只在
+   rate≈1（用户选了正常语速）时才采纳。 */
+function calibBase(ms,wc,rate){
+  if(!wc||ms<=120)return;
+  var v=_pickedVoice,local=(v&&v.localService!==false),b;
+  if(local)b=ms/wc*(rate||1);
+  else if(Math.abs((rate||1)-1)<0.01)b=ms/wc;
+  else return;
+  if(b<120||b>900)return;                  // 明显离谱的样本不采纳（比如被打断）
+  _wpsMs=Math.round(_wpsMs*0.6+b*0.4);     // 平滑，避免一句走音把基准带偏
+}
+function calibGap(n,spoken,target){
+  if(!target||target>=1)return 120;
+  var want=n*_wpsMs/target;       // 目标倍速下这段"应该"占的时长
+  var add=want-spoken;            // rate 生效时≈0；被忽略时正好是需要补的
+  if(add<80)add=80;               // 至少留个停顿，否则段与段连成一片，听不出断句
+  if(add>2600)add=2600;           // 兜底：别把一句话拖成一分钟
+  return Math.round(add);
+}
+/* target：目标倍速（0.5=一半速度）。给了就走校准，忽略 gap。
+   chunk：一次念几个词。1=逐词（最清楚）；3=三词一组（更自然）。 */
+function speakSeq(text,btn,gap,rate,done,chunk,target){
   if(!synth){toast('当前浏览器不支持朗读');return}
   stopSpeak();
   var ws=String(text).split(/\s+/).filter(Boolean),i=0;
-  var cn=Math.max(1,chunk||1),parts=[];
-  for(var a=0;a<ws.length;a+=cn)parts.push(ws.slice(a,a+cn).join(' '));
+  var cn=Math.max(1,chunk||1),parts=[],pn=[];
+  for(var a=0;a<ws.length;a+=cn){parts.push(ws.slice(a,a+cn).join(' '));pn.push(ws.slice(a,a+cn).length)}
   var gen=++_seqGen;              // 代际标记：cancel() 触发的残留 onend 不会污染新一轮
   _seqOn=true;
+  var tgt=target||0;
+  /* 整段共用同一个语音对象：逐段重挑正是"念着念着变声"的直接原因 */
+  var voice=pickVoice();_voiceLocked=true;
   var finish=function(){if(gen!==_seqGen)return;_seqOn=false;if(btn)btn.classList.remove('playing');if(done)done()};
   var step=function(){
     if(!_seqOn||gen!==_seqGen)return;
     if(i>=parts.length){finish();return}
     if(btn)btn.classList.add('playing');
+    var k=i;
     var u=new SpeechSynthesisUtterance(parts[i++]);
-    var p=pickVoice();
-    u.lang=(p&&p.lang)||'en-US';
+    u.lang=(voice&&voice.lang)||'en-US';
     u.rate=rate||(S.set.rate>1?1:S.set.rate);
     u.pitch=(S.set.pitch!=null?S.set.pitch:1);
-    if(p)try{u.voice=p}catch(e){}
-    u.onend=function(){if(_seqOn&&gen===_seqGen)setTimeout(step,gap||280)};
+    if(voice)try{u.voice=voice}catch(e){}
+    var t0=Date.now();
+    u.onend=function(){
+      if(!_seqOn||gen!==_seqGen)return;
+      var ms=Date.now()-t0;
+      /* 慢放序列内刻意不校准：慢放正是"怀疑 rate 没生效"的场景，此时换算出的
+         基准会偏小，再用它算下一轮就会越算越快——负反馈，慢放逐渐失效。
+         基准只在常速播放时校准，那里 rate≈设置值、可信。 */
+      if(!(tgt>0&&tgt<1))calibBase(ms,pn[k],u.rate);
+      var d=(tgt>0&&tgt<1)?calibGap(pn[k],ms,tgt):(gap!=null?gap:280);
+      setTimeout(step,Math.max(60,d));
+    };
     u.onerror=finish;
     try{synth.speak(u)}catch(e){finish()}
   };
   step();
+}
+/* 倍速播放统一入口：target=目标倍速（0.5 = 放慢到一半）。
+   拆段粒度跟着倍速走——越慢拆得越碎，校准越准、听感越清楚。 */
+function speakRate(text,btn,target,done){
+  if(!synth){toast('当前浏览器不支持朗读');return}
+  var t=Math.max(0.2,Math.min(1,target||1));
+  var seg=t<=0.4?1:t<=0.7?2:3;
+  speakSeq(text,btn,null,t,done,seg,t);
 }
 function hasSR(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
 var _srCur=null;
@@ -2693,6 +2772,15 @@ function againBtn(key){
   var t=key==='read'?'↻ 重新精读（清除完成标记）':'↻ 再来一遍';
   return '<button class="btn out full" style="margin-top:9px" onclick="deepAgain(\''+key+'\')">'+t+'</button>';
 }
+/* 练习【中途】的重来入口。
+   以前只有整阶走完（deepFinish）才出现「再来一遍」，练到第 5 句想从头过一遍时
+   页面上根本没有任何重置入口 —— 只能硬着头皮往下走或弃坑。这里补上常驻入口。 */
+function deepAgainBar(key,idx,n){
+  var d=deepOf(deepId()),hit=Object.keys(d[key+'Hit']||{}).length;
+  if(idx<=0&&!hit)return '';               // 还在第一句且没答过题，重来没意义
+  return '<div class="dprow" style="margin-top:10px">'+
+    '<button class="mini g" style="flex:1" onclick="deepAgain(\''+key+'\')">↻ 从头再来（已到第 '+(idx+1)+' / '+n+' 句'+(hit?'，已记 '+hit+' 句分':'')+'）</button></div>';
+}
 /* 某阶全部走完后的收尾面板：平均/最佳分 + 再来一遍 */
 function deepFinish(key,name){
   var d=deepOf(deepId()),items=deepItems(),hit=d[key+'Hit']||{},ks=Object.keys(hit);
@@ -2753,7 +2841,7 @@ function deepReadDlg(u){
       '<div class="den sel-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(dd.en,u.voc)+'</div>'+
       '<div class="dzh'+(S.set.showZh?'':' hide')+'">'+esc(dd.zh)+'</div>'+
       '<div class="dbtns"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
-      '<button class="mini g" onclick="speakSeq(this.dataset.x,this,240,0.85,null,2)" data-x="'+esc(dd.en)+'">🐢 0.5x 慢放</button>'+
+      '<button class="mini g" onclick="speakRate(this.dataset.x,this,0.5)" data-x="'+esc(dd.en)+'">🐢 0.5x 慢放</button>'+
       '<button class="mini g" onclick="parseSentence(\''+escJs(dd.en)+'\',\''+escJs(dd.zh)+'\',curUnit.voc,null)">🔍 解析</button></div></div></div>';
   });
   if(d.read)h+='<div class="deepdone">✓ 精读阶已完成</div>'+againBtn('read');
@@ -2768,14 +2856,15 @@ function deepCur(key){
   return {d:d,items:items,idx:idx,it:items[idx]||{en:'',zh:'',s:''}};
 }
 function deepEnded(d,key,items){return !!d[key]&&(d[key+'Idx']||0)>=items.length-1}
-/* 播放条：慢速一律走 speakSeq 逐词拆分 —— utterance.rate 在云端语音上会被忽略 */
+/* 播放条：慢速一律走 speakRate（实测校准，云端语音上也能真的慢下来）。
+   常速档跟随设置里的语速，不再写死 1.0 —— 否则用户调了 0.7 也白调。 */
 function deepPlayRow(en,extra){
-  var x=esc(en);
+  var x=esc(en),r=Math.round((S.set.rate||1)*100)/100;
   return '<div class="dprow">'+
-    '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+x+'">'+svg(I.vol,'s')+'正常速</button>'+
-    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,110,0.9,null,3)" data-x="'+x+'">0.8x</button>'+
-    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,240,0.85,null,2)" data-x="'+x+'">🐢 0.5x</button>'+
-    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,480,0.8,null,1)" data-x="'+x+'">🐢🐢 极慢</button>'+
+    '<button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+x+'">'+svg(I.vol,'s')+r+'x 常速</button>'+
+    '<button class="mini g" onclick="speakRate(this.dataset.x,this,0.75)" data-x="'+x+'">0.75x</button>'+
+    '<button class="mini g" onclick="speakRate(this.dataset.x,this,0.5)" data-x="'+x+'">🐢 0.5x</button>'+
+    '<button class="mini g" onclick="speakRate(this.dataset.x,this,0.3)" data-x="'+x+'">🐢🐢 0.3x</button>'+
     '<button class="mini g" onclick="stopSpeak()">停止</button></div>'+(extra||'');
 }
 /* ---- ① 听写 ---- */
@@ -2806,6 +2895,7 @@ function deepDict(u){
       '<button class="btn out" style="flex:1" onclick="dictAgain()">再听写一遍</button>'+
       '<button class="btn" style="flex:1" onclick="dictNext()">'+(idx>=n-1?'完成听写阶':'下一句')+'</button></div>';
   }
+  h+=deepAgainBar('dict',idx,n);
   return h+'</div>';
 }
 function dictCheck(){
@@ -2856,6 +2946,7 @@ function deepRetro(u){
       '<button class="btn out" style="flex:1" onclick="retroAgain()">再译一次</button>'+
       '<button class="btn" style="flex:1" onclick="retroNext()">'+(idx>=n-1?'完成回译阶':'下一句')+'</button></div>';
   }
+  h+=deepAgainBar('retro',idx,n);
   return h+'</div>';
 }
 function retroCheck(){
@@ -2940,6 +3031,7 @@ function deepShadow(u){
       (hasSR()?'<div class="dphint">推荐用「背诵并识别」：说完自动与原文<b>逐词比对</b>，绿色=说对，红色=漏词或错词。</div>'
               :'<div class="dphint">当前浏览器不支持语音识别（建议 Chrome / Edge 桌面版，且需联网），只能用计时自评模式。</div>');
   }
+  h+=deepAgainBar('shadow',idx,n);
   return h+'</div>';
 }
 function shadowManualRow(){
@@ -3007,7 +3099,9 @@ function toggleZh(btn){
   document.querySelectorAll('.dzh').forEach(function(e){e.classList.toggle('hide',!S.set.showZh)});
   btn.innerHTML=svg(I.eye,'s')+(S.set.showZh?'隐藏中文':'显示中文');
 }
-function speakSlow(btn){var r=S.set.rate;S.set.rate=0.6;speak(btn.dataset.x,btn);S.set.rate=r}
+/* 旧实现只是临时把 S.set.rate 改成 0.6 再调 speak()，等于把宝全押在
+   utterance.rate 上——云端语音直接忽略它，所以这个"0.6x"从来没生效过。 */
+function speakSlow(btn){speakRate(btn.dataset.x,btn,0.6)}
 var _pi=0;
 function playAll(btn){
   _pi=0;var d=curUnit.dlg;
@@ -3027,8 +3121,8 @@ function playSentences(text,btn,slow){
   (function next(){
     if(i>=sents.length){if(btn)btn.classList.remove('playing');return}
     var txt=sents[i++];
-    /* 慢放不能靠 utterance.rate —— 云端语音会直接忽略它。改用逐词拆分 + 间隔。 */
-    if(slow)speakSeq(txt,btn,190,0.85,function(){setTimeout(next,400)},2);
+    /* 慢放走实测校准的 speakRate，云端语音上也是真的 0.5 倍速 */
+    if(slow)speakRate(txt,btn,0.5,function(){setTimeout(next,250)});
     else speak(txt,null,function(){setTimeout(next,300);});
   })();
 }
@@ -3630,30 +3724,43 @@ function renderMe(){
   }
   h+='</div>';
 
-  // 部署到 GitHub
+  // 部署到 GitHub（默认折叠：把「清除令牌」「推送」藏进二级，避免一进页面就误触）
   var du=S.set.deployUrl||deployUrlOf(S.set.repo),hasTok=!!S.set.token;
-  h+='<div class="card"><div class="ch"><h2>'+svg(I.up)+'部署到 GitHub</h2>'+
-     (hasTok?'<span class="pill suc">令牌已保存</span>':'<span class="pill gray">未配置</span>')+'</div>'+
-   '<div class="field"><label>仓库路径</label>'+
-     '<input id="d_repo" placeholder="用户名/仓库名（如 zhangsan/hr-english）" value="'+esc(S.set.repo||'')+'"></div>'+
-   '<div class="field"><label>访问令牌（Personal Access Token）</label>'+
-     '<input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="'+
-       (hasTok?'已保存 ••••••••，重新粘贴可更换':'ghp_… 或 fine-grained token')+'"></div>'+
-   '<div class="field"><label>分支（留空 = 仓库默认分支）</label>'+
-     '<input id="d_branch" placeholder="main" value="'+esc(S.set.branch||'')+'"></div>'+
-   '<div class="field"><label>部署链接（自动推导，可改）</label>'+
-     '<input id="d_url" placeholder="'+(du||'填写仓库路径后自动生成')+'" value="'+esc(S.set.deployUrl||'')+'"></div>'+
-   '<div class="row" style="margin-bottom:8px">'+
-     '<button class="btn sm" style="flex:1" onclick="saveDeploy()">'+svg(I.check,'s')+'保存配置</button>'+
-     '<button class="btn out sm" style="flex:1" onclick="openDeploy()">🔗 打开线上版本</button></div>'+
-   '<div class="row">'+
-     '<button class="btn gh sm" style="flex:1" onclick="pushDeploy()">'+svg(I.up,'s')+'推送当前版本</button>'+
-     (hasTok?'<button class="btn dan sm" style="flex:1" onclick="clearToken()">清除令牌</button>':'')+'</div>'+
-   '<div class="hint" id="deployMsg" style="margin-top:9px">'+
-     (hasTok?'配置已就位：点「打开线上版本」直达，或点「推送当前版本」把最新改动同步到仓库。'
-            :'填一次仓库路径和令牌，之后一键打开线上版本、一键推送更新。')+'</div>'+
-   '<div class="hint" style="margin-top:7px">令牌只存在<b>这台设备的浏览器</b>里，只会发给 <b>api.github.com</b>，不会上传到其它任何地方。建议用 fine-grained token，只给这<b>一个仓库</b>的 Contents 读写权限。共用电脑请勿保存。</div>'+
-   '</div>';
+  h+='<div class="card"><div class="ch" style="cursor:pointer;user-select:none;-webkit-user-select:none;margin-bottom:'+
+       (_deployOpen?11:5)+'px" onclick="toggleDeploy()">'+
+     '<h2>'+svg(I.up)+'部署到 GitHub</h2>'+
+     (hasTok?'<span class="pill suc">令牌已保存</span>':'<span class="pill gray">未配置</span>')+
+     '<span style="flex:none;font-size:12.5px;color:var(--pri);font-weight:700">'+
+       (_deployOpen?'收起 ▴':'展开 ▾')+'</span></div>';
+  if(_deployOpen){
+    h+='<div class="field"><label>仓库路径</label>'+
+       '<input id="d_repo" placeholder="用户名/仓库名（如 zhangsan/hr-english）" value="'+esc(S.set.repo||'')+'"></div>'+
+     '<div class="field"><label>访问令牌（Personal Access Token）</label>'+
+       '<input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="'+
+         (hasTok?'已保存 ••••••••，重新粘贴可更换':'ghp_… 或 fine-grained token')+'"></div>'+
+     '<div class="field"><label>分支（留空 = 仓库默认分支）</label>'+
+       '<input id="d_branch" placeholder="main" value="'+esc(S.set.branch||'')+'"></div>'+
+     '<div class="field"><label>部署链接（自动推导，可改）</label>'+
+       '<input id="d_url" placeholder="'+(du||'填写仓库路径后自动生成')+'" value="'+esc(S.set.deployUrl||'')+'"></div>'+
+     '<div class="row" style="margin-bottom:8px">'+
+       '<button class="btn sm" style="flex:1" onclick="saveDeploy()">'+svg(I.check,'s')+'保存配置</button>'+
+       '<button class="btn out sm" style="flex:1" onclick="openDeploy()">🔗 打开线上版本</button></div>'+
+     '<div class="row">'+
+       '<button class="btn gh sm" style="flex:1" onclick="pushDeploy()">'+svg(I.up,'s')+'推送当前版本</button>'+
+       (hasTok?'<button class="btn dan sm" style="flex:1" onclick="clearToken()">清除令牌</button>':'')+'</div>'+
+     '<div class="hint" id="deployMsg" style="margin-top:9px">'+
+       (hasTok?'配置已就位：点「打开线上版本」直达，或点「推送当前版本」把最新改动同步到仓库。'
+              :'填一次仓库路径和令牌，之后一键打开线上版本、一键推送更新。')+'</div>'+
+     '<div class="hint" style="margin-top:7px">令牌只存在<b>这台设备的浏览器</b>里，只会发给 <b>api.github.com</b>，不会上传到其它任何地方。建议用 fine-grained token，只给这<b>一个仓库</b>的 Contents 读写权限。共用电脑请勿保存。</div>';
+  }else{
+    h+='<div class="hint" style="margin-top:2px">'+
+       (hasTok?('已配置：<b>'+esc(S.set.repo||'—')+'</b> · 令牌已保存'+
+                 (du?' · <a href="'+esc(du)+'" target="_blank" rel="noopener" style="color:var(--pri);font-weight:700">打开线上版本</a>':'')+
+                 '<br>需要推送更新或清除令牌时，点上方标题栏展开。')
+              :'填一次仓库路径和令牌，之后可一键打开线上版本、一键推送更新。<b>点上方标题栏展开</b>。')+
+       '</div>';
+  }
+  h+='</div>';
 
   // 数据管理
   h+='<div class="card"><div class="ch"><h2>'+svg(I.down)+'数据备份与管理</h2></div>'+
@@ -3674,6 +3781,9 @@ function renderMe(){
   document.getElementById('v-me').innerHTML=h;
 }
 /* ---------- 部署：仓库路径 / 令牌 / 一键推送 ---------- */
+/* 展开状态不留存在 S 里：每次打开应用都回到折叠态，最不容易误触「清除令牌」 */
+var _deployOpen=false;
+function toggleDeploy(){_deployOpen=!_deployOpen;renderMe();}
 function normRepo(r){
   return String(r||'').trim()
     .replace(/^https?:\/\/(www\.)?github\.com\//i,'')
