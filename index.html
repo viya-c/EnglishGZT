@@ -287,7 +287,7 @@ padding:2px 0;text-align:center;height:fit-content;margin-top:2px}
 .stip{background:var(--sucl);border-radius:9px;padding:9px 11px;font-size:12.5px;color:#0f6b39;line-height:1.65;margin-top:4px}
 .stip b{display:block;margin-bottom:2px}
 
-/* 可点词汇 / 划线 / 词汇测验 / 词库笔记 */
+/* 可点词汇 / 词汇测验 / 词库笔记 */
 .tw{color:var(--pri);font-weight:600;cursor:pointer;border-bottom:1.5px dotted var(--pri);padding:0 1px;border-radius:3px}
 .tw.on{background:var(--pril)}
 .den.hl,.sen.hl{background:linear-gradient(180deg,#fffbe6,#fff7cc);box-shadow:inset 0 0 0 2px #f4d97a;border-radius:8px;padding:3px 5px;margin:-3px -5px}
@@ -296,26 +296,17 @@ padding:2px 0;text-align:center;height:fit-content;margin-top:2px}
 .vt{background:#fff;border-radius:12px;box-shadow:var(--sh);padding:13px;margin-bottom:11px}
 .vtk{font-size:11px;font-weight:800;color:var(--l2);margin-bottom:4px}
 .vnote{width:100%;margin-top:8px;border:1px solid var(--bd);border-radius:8px;padding:7px 9px;font-size:13px;background:var(--bg);color:var(--ink);resize:vertical;min-height:42px;font-family:inherit;box-sizing:border-box}
-.hlline{background:linear-gradient(180deg,#fffbe6,#fff7cc);border-left:3px solid #f4d97a;border-radius:8px;padding:9px 11px;font-size:14px;line-height:1.65;margin-bottom:8px;cursor:pointer}
-.hlline b{color:#b8860b}
-.hlsub{font-size:12px;color:var(--sub);margin-top:3px;line-height:1.5}
-/* 自由划线：选中文本后浮出的工具条 */
+/* 选中文本后浮出的工具条 */
 .hlfloat{position:fixed;z-index:150;background:#b8860b;color:#fff;border-radius:14px;padding:4px;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(184,134,11,.45);cursor:default;display:none;align-items:center;user-select:none;-webkit-user-select:none;touch-action:manipulation}
 .hlfloat:active{transform:scale(.98)}
 .hlf{color:#fff;padding:6px 13px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
 .hlf:active{background:rgba(0,0,0,.18)}
-.hlf-sep{width:1px;height:18px;background:rgba(255,255,255,.45)}
-/* 用户自由划线的标记 */
-.ufhl{background:linear-gradient(180deg,#fff3b0,#ffe98a);border-radius:3px;box-shadow:inset 0 0 0 1px #f0c93d;padding:0 1px;color:inherit;cursor:pointer}
-.ufhl:active{background:linear-gradient(180deg,#ffe07a,#ffd95a)}
-/* 划线二次点击的释义气泡 */
+/* 点词 / 选词后的释义气泡 */
 .dsheet{background:#fff;border-radius:16px;padding:18px 18px 14px;max-width:300px;width:86%;box-shadow:var(--sh);text-align:center}
 .dword{font-size:19px;font-weight:800;color:var(--ink)}
 .dzh{font-size:15px;color:var(--sub);margin-top:7px;line-height:1.6}
 .dclose{margin-top:14px;font-size:13px;font-weight:700;color:var(--pri);background:var(--pril);border-radius:10px;padding:9px}
-/* 划线收藏列表里附带的中文释义 */
-.hlzh{display:inline-block;margin-left:6px;font-size:12px;font-weight:600;color:#a06a00;background:#fff3c4;border-radius:6px;padding:1px 6px;vertical-align:middle}
-/* 阅读：逐句划线/解析 + 可折叠中文 */
+/* 阅读：逐句解析 + 可折叠中文 */
 .rsen{background:#fff;border-radius:10px;box-shadow:var(--sh);padding:11px 12px;margin-bottom:10px}
 .rsen.hl{background:linear-gradient(180deg,#fffbe6,#fff7cc);box-shadow:inset 0 0 0 2px #f4d97a}
 .rsen-en{font-size:14.5px;line-height:1.8;color:#243042}
@@ -508,14 +499,7 @@ opacity:0;pointer-events:none;transition:.25s;max-width:88vw;text-align:center}
 <div class="mask" id="mask" onclick="if(event.target===this)closeSheet()"><div class="sheet" id="sheet"></div></div>
 <div class="mask pmask" id="parseModal" onclick="if(event.target===this)closeParse()"><div class="psheet"><div class="pshead"><b>🔍 句子解析</b><button class="iconbtn" onclick="closeParse()" aria-label="关闭"><svg class="ic l" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div><div class="pbody" id="parseBody"></div></div></div>
 <div class="hlfloat" id="hlfloat" style="display:none">
-  <span class="hlf" onclick="doHighlight()">✎ 划线</span>
-  <span class="hlf-sep"></span>
   <span class="hlf" onclick="favSel()">★ 加重点词</span>
-</div>
-<div class="hlfloat" id="hlMenu" style="display:none">
-  <span class="hlf" onclick="menuCancelHl()">取消划线</span>
-  <span class="hlf-sep"></span>
-  <span class="hlf" onclick="menuShowDef()">释义</span>
 </div>
 <div class="mask" id="defPop" onclick="if(event.target===this)closeDefPop()" style="display:none"><div class="dsheet"><div class="dword" id="defWord"></div><div class="dzh" id="defZh"></div><div class="dclose" onclick="closeDefPop()">知道了</div></div></div>
 <div class="toast" id="toast"></div>
@@ -1854,9 +1838,9 @@ function defaults(){
   var t=today();
   return {
     goal:{name:'日常职场场景无障碍交流',date:addD(t,100),dailyMin:25,dailyUnits:1,start:t},
-    prog:{},words:{},tasks:[],checkin:{},quizLog:[],spkLog:[],read:{},hl:{},
+    prog:{},words:{},tasks:[],checkin:{},quizLog:[],spkLog:[],read:{},
     deep:{},deepLog:[],deepMile:0,
-    set:{rate:0.85,autoScore:true,showZh:true,pitch:1,voiceURI:''},
+    set:{rate:0.85,autoScore:true,showZh:true,pitch:1,voiceURI:'',repo:'',token:'',branch:'',deployUrl:''},
     seeded:false,created:t
   };
 }
@@ -1865,6 +1849,7 @@ function load(){
   if(!S||!S.goal){S=defaults();seed();save()}
   var d=defaults();for(var k in d){if(S[k]===undefined)S[k]=d[k]}
   for(var k2 in d.set){if(S.set[k2]===undefined)S.set[k2]=d.set[k2]}
+  delete S.hl;                      /* 划线功能已下线，清掉历史遗留数据 */
 }
 function save(){try{localStorage.setItem(K,JSON.stringify(S))}catch(e){toast('存储空间不足，请导出备份后清理')}}
 
@@ -2026,7 +2011,10 @@ function clearDemo(){
 
 /* ---------------- 导入导出 ---------------- */
 function exportJSON(){
-  var blob=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
+  /* 令牌不进备份文件：备份常被存网盘/发给别人，泄露风险远高于"换设备重填一次"的成本 */
+  var out=JSON.parse(JSON.stringify(S));
+  if(out.set)delete out.set.token;
+  var blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='职场英语学习台备份_'+today()+'.json';a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href)},2000);
@@ -2040,6 +2028,7 @@ document.getElementById('fileIn').addEventListener('change',function(e){
       var d=JSON.parse(r.result);
       if(!d.goal&&!d.prog)throw 0;
       S=Object.assign(defaults(),d);
+      delete S.hl;                  /* 导入的旧备份可能带划线数据，一并剥离 */
       save();closeSheet();render();
       toast('导入成功：'+Object.keys(S.prog||{}).length+' 单元进度 / '+Object.keys(S.words||{}).length+' 个词');
     }catch(err){toast('文件格式不正确，请选择本工具导出的 JSON')}
@@ -2526,7 +2515,7 @@ function renderUnit(){
   else if(curTab==='sen'){
     h+='<div class="hint" style="margin-bottom:11px">这里拆的是<b>你听得懂单词却听不懂整句</b>的那类句子——把主干、从句、修饰成分分开看，长句就不再可怕。</div>';
     u.sen.forEach(function(s,si){
-      h+='<div class="sc"><div class="sen hl-target" data-cid="sen-'+si+'">'+linkVoc(s.en,u.voc)+'</div><div class="szh">'+esc(s.zh)+'</div>'+
+      h+='<div class="sc"><div class="sen sel-target" data-cid="sen-'+si+'">'+linkVoc(s.en,u.voc)+'</div><div class="szh">'+esc(s.zh)+'</div>'+
         '<div class="row" style="margin-top:9px"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(s.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
         '<button class="mini g" onclick="speakSlow(this)" data-x="'+esc(s.en)+'">0.6x 逐词</button>'+
         '<button class="mini g" onclick="parseSentence(\''+escJs(s.en)+'\',\''+escJs(s.zh)+'\',curUnit.voc,curUnit.sen['+si+'])">🔍 解析</button></div>'+
@@ -2607,7 +2596,7 @@ function renderUnit(){
         if(r.kind==='email'&&r.head){
           h+='<div class="remail"><div class="re"><span>收件</span>'+esc(r.head.to)+'</div><div class="re"><span>发件</span>'+esc(r.head.from)+'</div><div class="re"><span>主题</span>'+esc(r.head.subject)+'</div></div>';
         }
-        h+='<div class="rbody hl-target" id="rbody'+ri+'" data-cid="read-'+ri+'">'+linkVoc(r.en,r.voc)+'</div>';
+        h+='<div class="rbody sel-target" id="rbody'+ri+'" data-cid="read-'+ri+'">'+linkVoc(r.en,r.voc)+'</div>';
         h+='<div class="row" style="margin-top:8px">'+
           '<button class="mini" onclick="playSentences(document.getElementById(\'rbody'+ri+'\').innerText,this)">'+svg(I.play,'s')+'分句朗读</button>'+
           '<button class="mini g" onclick="playSentences(document.getElementById(\'rbody'+ri+'\').innerText,this,true)">0.6x 精听</button>'+
@@ -2642,7 +2631,6 @@ function renderUnit(){
     }
   }
   document.getElementById('upBody').innerHTML=h;
-  applyHl();
 }
 /* ================= 精学四阶（尚雯婕法） ================= */
 var DEEP_TAB=[['dict','①','听写'],['read','②','精读'],['retro','③','回译'],['shadow','④','背诵']];
@@ -2740,7 +2728,7 @@ function deepReadArticle(s){
   var r=s.r,d=deepOf(deepId());
   var h='<div class="dpcard"><div class="dphead"><b>② 对照精读</b></div>'+
     '<div class="dphint">通读全篇，再点 <b>🔍 解析全篇</b> 逐句拆结构；点生词可直接进词库。吃透全文后再进回译——回译练的是「用英文把这段说出来」。</div>'+
-    '<div class="dpsent hl-target" id="dprBody" data-cid="rd-'+deepRdIdx+'" style="font-size:15px;line-height:1.75">'+linkVoc(r.en,r.voc)+'</div>'+
+    '<div class="dpsent sel-target" id="dprBody" data-cid="rd-'+deepRdIdx+'" style="font-size:15px;line-height:1.75">'+linkVoc(r.en,r.voc)+'</div>'+
     '<div class="dpsent zh" style="margin-top:9px">'+esc(r.zh||'（本篇暂无中文译文）')+'</div>'+
     '<div class="dprow">'+
       '<button class="mini" onclick="playSentences(document.getElementById(\'dprBody\').innerText,this)">'+svg(I.play,'s')+'分句朗读</button>'+
@@ -2762,7 +2750,7 @@ function deepReadDlg(u){
     '<button class="mini g" onclick="openSpk(\''+u.id+'\')">'+svg(I.mic,'s')+'去跟读测评</button></div>';
   u.dlg.forEach(function(dd,i){
     h+='<div class="dlg'+(dd.b?' b':'')+'"><div class="dspk">'+esc(dd.s)+'</div><div class="dbub">'+
-      '<div class="den hl-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(dd.en,u.voc)+'</div>'+
+      '<div class="den sel-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(dd.en,u.voc)+'</div>'+
       '<div class="dzh'+(S.set.showZh?'':' hide')+'">'+esc(dd.zh)+'</div>'+
       '<div class="dbtns"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
       '<button class="mini g" onclick="speakSeq(this.dataset.x,this,240,0.85,null,2)" data-x="'+esc(dd.en)+'">🐢 0.5x 慢放</button>'+
@@ -3114,16 +3102,8 @@ function toggleUnk(w){
   else{S.words[w].unk=1;S.words[w].next=today();S.words[w].box=0;toast('已标「不认识」，今天复习');}
   save();renderUnit();
 }
-function toggleHl(btn,kind){
-  var t=btn.dataset.t,u=curUnit.id;
-  if(!S.hl[u])S.hl[u]=[];
-  var idx=S.hl[u].findIndex(function(x){return x.t===t&&x.k===kind;});
-  if(idx>=0){S.hl[u].splice(idx,1);toast('已取消划线');}
-  else{S.hl[u].push({t:t,k:kind});toast('已划线收藏该句');}
-  save();renderUnit();
-}
 function saveNote(w,val){if(S.words[w]){S.words[w].note=val;save();}}
-/* 句子按句拆分（用于阅读逐句划线/解析） */
+/* 句子按句拆分（用于阅读逐句解析） */
 function splitSent(t){
   if(!t)return [];
   var out=[];
@@ -3310,15 +3290,14 @@ function parseSentence(en,zh,voc,extra){
 }
 function toggleRzh(ri){var el=document.getElementById('rzh'+ri);if(!el)return;el.style.display=el.style.display==='none'?'block':'none';}
 function closeParse(){document.getElementById('parseModal').classList.remove('on');}
-/* ===== 自由划线：选中句子里的任意词/短语后浮出工具条 ===== */
+/* ===== 选词：选中句子里的任意词/短语后浮出工具条 ===== */
 var hlSel=null;
 function onTextSel(){
-  hideHlMenu();
   var sel=window.getSelection();
   if(!sel||sel.isCollapsed||!sel.toString().trim()){hideHlFloat();return;}
   var r=sel.getRangeAt(0),node=r.commonAncestorContainer;
   var el=node.nodeType===3?node.parentElement:node;
-  var tgt=el&&el.closest?el.closest('.hl-target'):null;
+  var tgt=el&&el.closest?el.closest('.sel-target'):null;
   if(!tgt){hideHlFloat();return;}
   hlSel={cid:tgt.getAttribute('data-cid'),sub:sel.toString().trim(),range:r.cloneRange()};
   var rect=r.getBoundingClientRect(),f=document.getElementById('hlfloat');
@@ -3328,57 +3307,6 @@ function onTextSel(){
   f.style.top=Math.max(8,rect.top-44)+'px';
 }
 function hideHlFloat(){var f=document.getElementById('hlfloat');if(f)f.style.display='none';hlSel=null;}
-/* 计算 range 相对于容器纯文本字符起点/终点偏移（不受内部 span 嵌套影响） */
-function selOffsets(container,range){
-  var walker=document.createTreeWalker(container,NodeFilter.SHOW_TEXT,null,false);
-  var nodes=[],full='';while(walker.nextNode()){nodes.push(walker.currentNode);full+=walker.currentNode.nodeValue;}
-  var sn=range.startContainer,so=range.startOffset,en=range.endContainer,eo=range.endOffset;
-  var pos=0,start=null,end=null;
-  for(var i=0;i<nodes.length;i++){
-    var len=nodes[i].nodeValue.length;
-    if(start===null&&nodes[i]===sn)start=pos+so;
-    if(end===null&&nodes[i]===en){end=pos+eo;break;}
-    pos+=len;
-  }
-  if(start===null)start=0;
-  if(end===null)end=full.length;
-  return [start,end];
-}
-/* 按字符偏移在容器内精确包裹 <mark>（重新渲染后也能稳定还原到同一段） */
-function wrapRange(container,start,end,hid){
-  if(!container||end<=start)return false;
-  var walker=document.createTreeWalker(container,NodeFilter.SHOW_TEXT,null,false);
-  var nodes=[],full='';while(walker.nextNode()){nodes.push(walker.currentNode);full+=walker.currentNode.nodeValue;}
-  var pos=0,startNode,startOff,endNode,endOff;
-  for(var i=0;i<nodes.length;i++){
-    var len=nodes[i].nodeValue.length;
-    if(startNode===undefined&&pos+len>start){startNode=nodes[i];startOff=start-pos;}
-    if(endNode===undefined&&pos+len>=end){endNode=nodes[i];endOff=end-pos;break;}
-    pos+=len;
-  }
-  if(!startNode||!endNode)return false;
-  var r=document.createRange();r.setStart(startNode,startOff);r.setEnd(endNode,endOff);
-  var mark=document.createElement('mark');mark.className='ufhl';if(hid)mark.dataset.hid=hid;
-  try{mark.appendChild(r.extractContents());r.insertNode(mark);}catch(e){return false;}
-  return true;
-}
-function doHighlight(){
-  if(!hlSel||!hlSel.range){hideHlFloat();return;}
-  var u=curUnit.id,el=document.querySelector('#upBody [data-cid="'+hlSel.cid+'"]');
-  if(!el){hideHlFloat();return;}
-  var off=selOffsets(el,hlSel.range);
-  if(!off||off[1]<=off[0]){hideHlFloat();return;}
-  var sub=el.textContent.substring(off[0],off[1]);
-  var hid='h'+Date.now()+Math.floor(Math.random()*9999);
-  wrapRange(el,off[0],off[1],hid);
-  if(!S.hl[u])S.hl[u]=[];
-  if(!S.hl[u].some(function(x){return x.cid===hlSel.cid&&x.off===off[0]&&x.len===off[1]-off[0];})){
-    S.hl[u].push({id:hid,cid:hlSel.cid,off:off[0],len:off[1]-off[0],sub:sub,sent:el.textContent,zh:zhOf(sub.replace(/[^A-Za-z'’\-]/g,'').trim()),fav:0});
-    save();
-  }
-  hideHlFloat();var s=window.getSelection();if(s)s.removeAllRanges();
-  toast('已划线');
-}
 /* 从浮条把选中的词加入重点词库（带释义，不切换/删除已有词） */
 function favSel(){
   if(!hlSel){hideHlFloat();return;}
@@ -3387,36 +3315,9 @@ function favSel(){
   var zh=zhOf(w);
   if(!S.words[w]){
     S.words[w]={w:w,zh:zh,u:curUnit?curUnit.id:'',box:0,next:today(),wrong:0,fav:0};
-    save();toast('已加入核心词库'+(zh?'（'+zh+'）':''));
+    save();showDefPop(w,zh);
   }else{toast('「'+w+'」已在词库中');}
   hideHlFloat();var s=window.getSelection();if(s)s.removeAllRanges();
-}
-function removeHl(hid){
-  var u=curUnit.id;if(!S.hl[u])return;
-  var before=S.hl[u].length;
-  S.hl[u]=S.hl[u].filter(function(x){return x.id!==hid});
-  if(S.hl[u].length!==before){save();renderUnit();toast('已取消划线');}
-}
-/* 点击已划线：弹出「取消划线 / 释义」菜单（不再直接删除） */
-var hlMenuHid=null;
-function showHlMenu(mk){
-  hlMenuHid=mk.dataset.hid;
-  var rect=mk.getBoundingClientRect(),f=document.getElementById('hlMenu');
-  f.style.display='flex';
-  var x=rect.left+rect.width/2;
-  f.style.left=Math.max(8,Math.min(window.innerWidth-f.offsetWidth-8,x-f.offsetWidth/2))+'px';
-  f.style.top=Math.max(8,rect.top-44)+'px';
-}
-function hideHlMenu(){var f=document.getElementById('hlMenu');if(f)f.style.display='none';hlMenuHid=null;}
-function menuCancelHl(){var hid=hlMenuHid;hideHlMenu();if(hid)removeHl(hid);}
-function menuShowDef(){
-  var hid=hlMenuHid;hideHlMenu();
-  if(!hid)return;
-  var list=S.hl[curUnit.id]||[];
-  var x=list.find(function(y){return y.id===hid});
-  if(!x)return;
-  if(x.zh)showDefPop(x.sub,x.zh);
-  else parseSentence(x.sub,'',curUnit.voc,null);
 }
 function showDefPop(w,zh){
   document.getElementById('defWord').textContent=w;
@@ -3424,28 +3325,13 @@ function showDefPop(w,zh){
   document.getElementById('defPop').style.display='flex';
 }
 function closeDefPop(){document.getElementById('defPop').style.display='none';}
-/* 渲染后重新套用已保存的自由划线（按字符偏移精确还原） */
-function applyHl(){
-  var list=S.hl[curUnit.id]||[];
-  list.forEach(function(x){var el=document.querySelector('#upBody [data-cid="'+x.cid+'"]');if(el&&x.off!=null)wrapRange(el,x.off,x.off+(x.len||0),x.id);});
-}
-function jumpHl(uid,cid,tab){
-  openUnit(uid,tab);renderMe();
-  if(cid)setTimeout(function(){var el=document.querySelector('#upBody [data-cid="'+cid+'"]');if(el)el.scrollIntoView({block:'center'});},350);
-}
 document.addEventListener('mouseup',function(e){
   if(e.target.closest&&e.target.closest('#hlfloat'))return;
-  if(e.target.closest&&e.target.closest('#hlMenu'))return;
-  var mk=e.target.closest&&e.target.closest('.ufhl');
-  if(mk&&mk.dataset.hid){showHlMenu(mk);return;}
-  hideHlMenu();onTextSel();
+  onTextSel();
 });
 document.addEventListener('touchend',function(e){
   if(e.target.closest&&e.target.closest('#hlfloat'))return;
-  if(e.target.closest&&e.target.closest('#hlMenu'))return;
-  var mk=e.target.closest&&e.target.closest('.ufhl');
-  if(mk&&mk.dataset.hid){setTimeout(function(){showHlMenu(mk);},10);return;}
-  setTimeout(function(){hideHlMenu();onTextSel();},10);
+  setTimeout(function(){onTextSel();},10);
 });
 document.addEventListener('selectionchange',function(){var s=window.getSelection();if(!s||s.isCollapsed)hideHlFloat();});
 if(document.getElementById('upBody'))document.getElementById('upBody').addEventListener('scroll',hideHlFloat);
@@ -3744,24 +3630,30 @@ function renderMe(){
   }
   h+='</div>';
 
-  // 我的划线 · 经典句收藏
-  var hlUnits=Object.keys(S.hl||{}).filter(function(u){return S.hl[u]&&S.hl[u].length});
-  var hlCount=hlUnits.reduce(function(s,u){return s+S.hl[u].length;},0);
-  h+='<div class="card"><div class="ch"><h2>✎ 我的划线</h2>'+
-     '<span class="pill '+(hlCount?'blue':'gray')+'">'+hlCount+' 句</span></div>';
-  if(!hlCount)h+='<div class="empty">在对话、长难句或阅读里<b>选中</b>想记的词或句子，浮出的「✎ 划线」会把它收进这里（仅作划线笔记，不进收藏）；点「🔍 解析」还能看语法拆解。</div>';
-  else{
-    hlUnits.forEach(function(uid){
-      var um=allUnits().find(function(x){return x.id===uid;});
-      h+='<div class="hint" style="margin:7px 0 4px"><b>'+(um?um.t:'')+'</b></div>';
-      S.hl[uid].forEach(function(x){
-        var tab=(x.cid||'').indexOf('read-')===0?'read':(x.cid||'').indexOf('sen-')===0?'sen':'dlg';
-        h+='<div class="hlline" onclick="jumpHl(\''+uid+'\',\''+(x.cid||'')+'\',\''+tab+'\')">'+
-          '<b>'+esc(x.sub||'')+'</b>'+(x.zh?('<span class="hlzh">'+esc(x.zh)+'</span>'):'')+(x.sent?('<div class="hlsub">'+esc(x.sent)+'</div>'):'')+'</div>';
-      });
-    });
-  }
-  h+='</div>';
+  // 部署到 GitHub
+  var du=S.set.deployUrl||deployUrlOf(S.set.repo),hasTok=!!S.set.token;
+  h+='<div class="card"><div class="ch"><h2>'+svg(I.up)+'部署到 GitHub</h2>'+
+     (hasTok?'<span class="pill suc">令牌已保存</span>':'<span class="pill gray">未配置</span>')+'</div>'+
+   '<div class="field"><label>仓库路径</label>'+
+     '<input id="d_repo" placeholder="用户名/仓库名（如 zhangsan/hr-english）" value="'+esc(S.set.repo||'')+'"></div>'+
+   '<div class="field"><label>访问令牌（Personal Access Token）</label>'+
+     '<input id="d_token" type="password" autocomplete="off" spellcheck="false" placeholder="'+
+       (hasTok?'已保存 ••••••••，重新粘贴可更换':'ghp_… 或 fine-grained token')+'"></div>'+
+   '<div class="field"><label>分支（留空 = 仓库默认分支）</label>'+
+     '<input id="d_branch" placeholder="main" value="'+esc(S.set.branch||'')+'"></div>'+
+   '<div class="field"><label>部署链接（自动推导，可改）</label>'+
+     '<input id="d_url" placeholder="'+(du||'填写仓库路径后自动生成')+'" value="'+esc(S.set.deployUrl||'')+'"></div>'+
+   '<div class="row" style="margin-bottom:8px">'+
+     '<button class="btn sm" style="flex:1" onclick="saveDeploy()">'+svg(I.check,'s')+'保存配置</button>'+
+     '<button class="btn out sm" style="flex:1" onclick="openDeploy()">🔗 打开线上版本</button></div>'+
+   '<div class="row">'+
+     '<button class="btn gh sm" style="flex:1" onclick="pushDeploy()">'+svg(I.up,'s')+'推送当前版本</button>'+
+     (hasTok?'<button class="btn dan sm" style="flex:1" onclick="clearToken()">清除令牌</button>':'')+'</div>'+
+   '<div class="hint" id="deployMsg" style="margin-top:9px">'+
+     (hasTok?'配置已就位：点「打开线上版本」直达，或点「推送当前版本」把最新改动同步到仓库。'
+            :'填一次仓库路径和令牌，之后一键打开线上版本、一键推送更新。')+'</div>'+
+   '<div class="hint" style="margin-top:7px">令牌只存在<b>这台设备的浏览器</b>里，只会发给 <b>api.github.com</b>，不会上传到其它任何地方。建议用 fine-grained token，只给这<b>一个仓库</b>的 Contents 读写权限。共用电脑请勿保存。</div>'+
+   '</div>';
 
   // 数据管理
   h+='<div class="card"><div class="ch"><h2>'+svg(I.down)+'数据备份与管理</h2></div>'+
@@ -3769,7 +3661,7 @@ function renderMe(){
    '<button class="btn out sm" style="flex:1" onclick="document.getElementById(\'fileIn\').click()">导入恢复</button></div>'+
    '<div class="row"><button class="btn out sm" style="flex:1" onclick="openSheet(\'demo\')">清空示例数据</button>'+
    '<button class="btn dan sm" style="flex:1" onclick="openSheet(\'clear\')">清空全部数据</button></div>'+
-   '<div class="hint" style="margin-top:10px">数据全部存在本机浏览器（localStorage），换设备、清缓存、换浏览器都会丢失，请定期导出。导入不限条数。</div></div>';
+   '<div class="hint" style="margin-top:10px">数据全部存在本机浏览器（localStorage），换设备、清缓存、换浏览器都会丢失，请定期导出。导入不限条数。<b>GitHub 令牌不会写入备份文件</b>，换设备后重新填一次即可。</div></div>';
 
   h+='<div class="card"><div class="ch"><h2>'+svg(I.book)+'怎么用最有效</h2></div>'+
    '<div class="hint">'+
@@ -3780,6 +3672,101 @@ function renderMe(){
    '</div></div>';
 
   document.getElementById('v-me').innerHTML=h;
+}
+/* ---------- 部署：仓库路径 / 令牌 / 一键推送 ---------- */
+function normRepo(r){
+  return String(r||'').trim()
+    .replace(/^https?:\/\/(www\.)?github\.com\//i,'')
+    .replace(/\.git$/i,'').replace(/\/+$/,'');
+}
+function deployUrlOf(repo){
+  var rp=normRepo(repo),m=rp.match(/^([^\/]+)\/([^\/]+)$/);
+  if(!m)return '';
+  return 'https://'+m[1]+'.github.io/'+m[2]+'/';
+}
+function ghApi(path,opt){
+  opt=opt||{};
+  var hd={'Accept':'application/vnd.github+json'};
+  if(S.set.token)hd['Authorization']='Bearer '+S.set.token;
+  if(opt.body)hd['Content-Type']='application/json';
+  var init={method:opt.method||'GET',headers:hd};
+  if(opt.body)init.body=JSON.stringify(opt.body);
+  return fetch('https://api.github.com'+path,init);
+}
+function b64u8(str){
+  var b=new TextEncoder().encode(str),o='';
+  for(var i=0;i<b.length;i++)o+=String.fromCharCode(b[i]);
+  return btoa(o);
+}
+function setDeployMsg(t){var e=document.getElementById('deployMsg');if(e)e.innerHTML=t;}
+function saveDeploy(){
+  var g=function(id){var e=document.getElementById(id);return e?e.value.trim():'';};
+  S.set.repo=normRepo(g('d_repo'));
+  var tk=g('d_token');
+  if(tk)S.set.token=tk;                     /* 留空 = 保持已保存的令牌 */
+  S.set.branch=g('d_branch');
+  S.set.deployUrl=g('d_url')||deployUrlOf(S.set.repo);
+  save();renderMe();
+  toast(S.set.repo?('部署配置已保存 · '+(S.set.deployUrl||'')):'已清空仓库路径');
+}
+function openDeploy(){
+  var u=S.set.deployUrl||deployUrlOf(S.set.repo);
+  if(!u){toast('先填仓库路径（用户名/仓库名）');return;}
+  window.open(u,'_blank');
+}
+function clearToken(){
+  if(!S.set.token){toast('当前没有保存令牌');return;}
+  if(!confirm('清除已保存的访问令牌？\n之后推送需要重新填写。'))return;
+  S.set.token='';save();renderMe();toast('令牌已清除');
+}
+/* 推送：抓取本页源码 → 查默认分支 → 取远端 sha → PUT index.html */
+function pushDeploy(){
+  var repo=normRepo(S.set.repo);
+  if(!repo||repo.split('/').length!==2){toast('先填仓库路径，格式：用户名/仓库名');return;}
+  if(!S.set.token){toast('先填访问令牌');return;}
+  if(!confirm('将把当前页面的完整源码推送到\n\n  '+repo+'  的  index.html\n\n覆盖线上已有的版本。继续？'))return;
+  setDeployMsg('⏳ 正在读取当前页面源码…');
+  var src=location.href.split('#')[0].split('?')[0];
+  fetch(src+(src.indexOf('?')>=0?'&':'?')+'_raw='+Date.now(),{cache:'no-store'})
+  .then(function(r){
+    if(!r.ok)throw new Error('读取失败（HTTP '+r.status+'）');
+    return r.text();
+  })
+  .then(function(html){
+    if(!/<!DOCTYPE html/i.test(html)||html.length<50000)
+      throw new Error('读到的不是完整源码。请从线上部署链接（https）打开本页面后再推送。');
+    setDeployMsg('⏳ 正在连接仓库 '+esc(repo)+' …');
+    return ghApi('/repos/'+repo).then(function(r){
+      return r.json().then(function(j){
+        if(!r.ok)throw new Error(j&&j.message?j.message:('仓库读取失败 '+r.status));
+        return {html:html,def:j.default_branch||'main'};
+      });
+    });
+  })
+  .then(function(o){
+    var br=(S.set.branch||'').trim()||o.def;
+    setDeployMsg('⏳ 检查远端 index.html（分支 '+esc(br)+'）…');
+    return ghApi('/repos/'+repo+'/contents/index.html?ref='+encodeURIComponent(br))
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(j){return {html:o.html,br:br,sha:j?j.sha:''};});
+  })
+  .then(function(o){
+    setDeployMsg('⏳ 正在推送（'+(o.sha?'更新':'新建')+' index.html）…');
+    var body={message:'更新职场英语学习台 '+today(),content:b64u8(o.html),branch:o.br};
+    if(o.sha)body.sha=o.sha;
+    return ghApi('/repos/'+repo+'/contents/index.html',{method:'PUT',body:body});
+  })
+  .then(function(r){
+    return r.json().then(function(j){
+      if(!r.ok)throw new Error(j&&j.message?j.message:('推送失败 '+r.status));
+      setDeployMsg('✓ 已推送到 <b>'+esc(repo)+'</b>，GitHub Pages 通常 1–2 分钟内生效。');
+      toast('推送成功');
+    });
+  })
+  .catch(function(e){
+    var m=String((e&&e.message)||e);
+    setDeployMsg('✗ '+esc(m));
+  });
 }
 function advice(abil,cover){
   var min=abil.slice().sort(function(a,b){return a[1]-b[1]})[0];
