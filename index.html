@@ -1856,7 +1856,7 @@ function defaults(){
     goal:{name:'日常职场场景无障碍交流',date:addD(t,100),dailyMin:25,dailyUnits:1,start:t},
     prog:{},words:{},tasks:[],checkin:{},quizLog:[],spkLog:[],read:{},hl:{},
     deep:{},deepLog:[],deepMile:0,
-    set:{rate:0.85,autoScore:true,showZh:true},
+    set:{rate:0.85,autoScore:true,showZh:true,pitch:1,voiceURI:''},
     seeded:false,created:t
   };
 }
@@ -1887,7 +1887,7 @@ function deepCount(){var n=0;for(var k in (S.deep||{})){if(S.deep[k]&&S.deep[k].
 function deepStep(id){var d=deepOf(id);return (d.dict?1:0)+(d.read?1:0)+(d.retro?1:0)+(d.shadow?1:0)}
 /* 标记某一阶完成；四阶全绿则置 deepDone 并触发里程碑 */
 function markDeep(key,val){
-  var d=deepOf(curUnit.id);
+  var d=deepOf(deepId());
   d[key]=val==null?1:val;
   if(d.dict&&d.read&&d.retro&&d.shadow&&!d.deepDone){
     d.deepDone=1;d.ts=today();
@@ -1907,7 +1907,7 @@ function markDeep(key,val){
 }
 /* 听写/回译单句记分：idx 句命中率 */
 function setDeepHit(field,idx,score){
-  var d=deepOf(curUnit.id);
+  var d=deepOf(deepId());
   d[field][idx]=score;save();
 }
 
@@ -1955,8 +1955,21 @@ function openSheet(type,arg){
   }else if(type==='setting'){
     h='<h3>设置 · 数据</h3><div class="sd2">数据只存在你自己的浏览器里，服务器上没有副本。换设备请用导出/导入。</div>'+
     '<div class="field"><label>朗读语速</label><select id="f_rate">'+
-      [['0.7','0.7 慢速（精听跟读）'],['0.85','0.85 偏慢（推荐起步）'],['1','1.0 正常语速'],['1.15','1.15 快速（挑战）']]
-      .map(function(o){return '<option value="'+o[0]+'"'+(String(S.set.rate)===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
+      [['0.7','0.7 慢速（精听跟读）'],['0.85','0.85 偏慢（推荐起步）'],['0.95','0.95 接近自然'],['1','1.0 正常语速'],['1.15','1.15 快速（挑战）']]
+      .map(function(o){return '<option value="'+o[0]+'"'+(String(S.set.rate)===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select>'+
+      '<div class="hint" style="margin-top:5px">语速调得越慢，机械感通常越重；想听感自然可选 <b>0.95–1.0</b>。</div></div>'+
+    '<div class="field"><label>朗读语音</label><select id="f_voice">'+
+      '<option value="">自动挑最自然的（推荐）</option>'+
+      enVoices().slice().sort(function(a,b){return voiceScore(b)-voiceScore(a)}).map(function(v){
+        return '<option value="'+esc(v.voiceURI)+'"'+(S.set.voiceURI===v.voiceURI?' selected':'')+'>'+
+          esc(v.name)+' · '+(v.localService===false?'云端（更自然）':'本地')+'</option>'}).join('')+
+      '</select>'+
+      '<div class="row" style="margin-top:7px"><button class="btn gh sm" style="flex:1" onclick="tryVoice(document.getElementById(\'f_voice\').value)">🔊 试听这句</button></div>'+
+      '<div class="hint" style="margin-top:6px">当前系统有 <b>'+enVoices().length+'</b> 个英语语音。名字带 <b>Natural / Neural / Enhanced / Cloud</b> 的明显更自然。若列表里没有，去系统「设置 → 语音/辅助功能」装一个高质量语音包，再刷新本页即可。</div>'+
+      voiceDiag()+'</div>'+
+    '<div class="field"><label>音调</label><select id="f_pitch">'+
+      [['0.9','0.9 偏低沉'],['1','1.0 标准'],['1.1','1.1 偏明亮']]
+      .map(function(o){return '<option value="'+o[0]+'"'+(String(S.set.pitch||1)===o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
     '<div class="field"><label>口语评分模式</label><select id="f_auto">'+
       '<option value="1"'+(S.set.autoScore?' selected':'')+'>语音识别自动打分（推荐）</option>'+
       '<option value="0"'+(!S.set.autoScore?' selected':'')+'>手动自评（设备不支持时）</option></select></div>'+
@@ -1991,7 +2004,9 @@ function saveGoal(){
 function saveSet(){
   S.set.rate=parseFloat(document.getElementById('f_rate').value);
   S.set.autoScore=document.getElementById('f_auto').value==='1';
-  save();closeSheet();toast('设置已保存')
+  var fv=document.getElementById('f_voice');if(fv)S.set.voiceURI=fv.value;
+  var fp=document.getElementById('f_pitch');if(fp)S.set.pitch=parseFloat(fp.value);
+  resetVoice();save();closeSheet();toast('设置已保存')
 }
 function addTask(){
   var t=document.getElementById('f_tt').value.trim();
@@ -2035,23 +2050,195 @@ document.getElementById('fileIn').addEventListener('change',function(e){
 
 /* ---------------- 语音 ---------------- */
 var synth=window.speechSynthesis,curUtter=null;
+/* ---- 语音管理 ----------------------------------------------------------
+   Chrome 的 getVoices() 是异步的：页面刚加载时首次调用常返回空数组。
+   旧实现没处理这点，结果 pick=null 退回系统默认语音（往往是最机械的那个），
+   这正是"机器人味"的主因。这里做延迟重试 + voiceschanged 监听。 */
+var _voices=null;
+function initVoices(){
+  if(!synth)return;
+  /* 语音列表是异步补齐的：若后来才加载到更好的语音，必须让已锁定的选择失效重挑，
+     否则"自动挑最自然"会一直卡在第一次拿到的那个（常常是机械的本地语音）。 */
+  var grab=function(){
+    try{
+      var v=synth.getVoices();
+      if(v&&v.length&&(!_voices||v.length>_voices.length)){_voices=v;resetVoice()}
+      else if(v&&v.length)_voices=v;
+    }catch(e){}
+  };
+  grab();
+  try{if(synth.addEventListener)synth.addEventListener('voiceschanged',grab)}catch(e){}
+  setTimeout(grab,250);setTimeout(grab,1000);setTimeout(grab,2500);
+}
+function enVoices(){
+  if(!_voices&&synth){try{var v=synth.getVoices();if(v&&v.length)_voices=v}catch(e){}}
+  return (_voices||[]).filter(function(x){return /^en/i.test(x.lang)});
+}
+/* 自然度评分：优先 neural / natural / enhanced 与云端语音，排除机械引擎 */
+function voiceScore(v){
+  var n=(v.name||'')+' '+(v.voiceURI||''),s=0;
+  if(/natural|neural/i.test(n))s+=100;
+  if(/enhanced|premium/i.test(n))s+=90;
+  if(/online|cloud|server|network/i.test(n))s+=55;
+  if(!v.localService)s+=35;                       // 非本地 = 云端合成，通常更自然
+  if(/google/i.test(n))s+=40;
+  if(/microsoft/i.test(n))s+=28;
+  if(/samantha|aria|jenny|guy|libby|sonia|ryan|karen|daniel|moira|tessa|fiona|zira|david/i.test(n))s+=22;
+  if(/^en[-_]US/i.test(v.lang))s+=18;else if(/^en[-_]GB/i.test(v.lang))s+=10;
+  if(/espeak|pico|compact|robot|novelty|festival|flite/i.test(n))s-=90;
+  return s;
+}
+/* 选中后锁定：voices 是异步填充的，若每句都重算，
+   加载过程中会中途换语音 —— 听起来就是"念着念着变声"。 */
+var _pickedVoice=null,_pickKey=null;
+function pickVoice(){
+  var key=S.set.voiceURI||'';
+  if(_pickedVoice&&_pickKey===key)return _pickedVoice;
+  var vs=enVoices();if(!vs.length)return _pickedVoice||null;
+  if(S.set.voiceURI){for(var i=0;i<vs.length;i++)if(vs[i].voiceURI===S.set.voiceURI){_pickedVoice=vs[i];_pickKey=key;return _pickedVoice}}
+  var best=vs[0],bs=-1e9;
+  vs.forEach(function(v){var s=voiceScore(v);if(s>bs){bs=s;best=v}});
+  _pickedVoice=best;_pickKey=key;
+  return best;
+}
+function resetVoice(){_pickedVoice=null;_pickKey=null}
 function speak(text,btn,cb,rate){
   if(!synth){toast('当前浏览器不支持朗读');return}
   synth.cancel();
   document.querySelectorAll('.mini.playing').forEach(function(b){b.classList.remove('playing')});
   var u=new SpeechSynthesisUtterance(text);
-  u.lang='en-US';u.rate=(rate!=null?rate:S.set.rate);u.pitch=1;
-  var vs=synth.getVoices(),pick=null;
-  for(var i=0;i<vs.length;i++){if(/en[-_]US/i.test(vs[i].lang)&&/(Samantha|Google US|Aria|Jenny|Female|Alex)/i.test(vs[i].name)){pick=vs[i];break}}
-  if(!pick)for(var j=0;j<vs.length;j++){if(/^en/i.test(vs[j].lang)){pick=vs[j];break}}
-  if(pick)u.voice=pick;
+  var pick=pickVoice();
+  u.lang=(pick&&pick.lang)||'en-US';
+  u.rate=(rate!=null?rate:S.set.rate);
+  u.pitch=(S.set.pitch!=null?S.set.pitch:1);
+  if(pick)try{u.voice=pick}catch(e){}
   if(btn)btn.classList.add('playing');
   u.onend=function(){if(btn)btn.classList.remove('playing');if(cb)cb()};
   u.onerror=function(){if(btn)btn.classList.remove('playing')};
   curUtter=u;synth.speak(u);
 }
-function stopSpeak(){if(synth)synth.cancel();document.querySelectorAll('.mini.playing').forEach(function(b){b.classList.remove('playing')})}
+/* 试听当前选择的语音 */
+function tryVoice(uri){
+  if(!synth){toast('当前浏览器不支持朗读');return}
+  var v=null,vs=enVoices();
+  if(uri){for(var i=0;i<vs.length;i++)if(vs[i].voiceURI===uri){v=vs[i];break}}
+  if(!v)v=pickVoice();
+  synth.cancel();
+  var u=new SpeechSynthesisUtterance('Hello. Let us go over your team headcount plan for next quarter.');
+  u.lang=(v&&v.lang)||'en-US';u.rate=S.set.rate;u.pitch=(S.set.pitch!=null?S.set.pitch:1);
+  if(v)try{u.voice=v}catch(e){}
+  synth.speak(u);
+  toast(v?('试听：'+v.name):'试听（系统默认）');
+}
+/* 语音质量诊断：告诉用户当前落到哪个语音、还能怎么改善 */
+function voiceInfo(){
+  var vs=enVoices(),p=pickVoice();
+  return {total:vs.length,pick:p?p.name:'（系统默认，未加载到英语语音）',
+    local:(p&&p.localService!==false),
+    best:vs.slice().sort(function(a,b){return voiceScore(b)-voiceScore(a)}).slice(0,5).map(function(v){return v.name})};
+}
+/* 设置页的语音诊断条：直接告诉用户"现在到底在用谁念" */
+function voiceDiag(){
+  var i=voiceInfo(),vs=enVoices();
+  if(!vs.length)return '<div class="hint" style="margin-top:6px;color:var(--wrn)">⚠️ 还没加载到英语语音（浏览器是异步加载的，若刚打开页面请稍等几秒再进设置）。</div>';
+  var tips=[];
+  if(i.local)tips.push('这是<b>本地语音</b>，机械感通常偏重，建议换列表里带 Natural / Neural / Cloud 的');
+  if(!/natural|neural|enhanced|premium/i.test(i.pick))tips.push('当前语音不属于高质量系列，可手动选一个更自然的');
+  return '<div class="hint" style="margin-top:6px">🎙 当前实际发音：<b>'+esc(i.pick)+'</b>'+
+    (tips.length?'<br>'+tips.join('；'):'（已是当前系统里最自然的一个 ✓）')+'</div>';
+}
+function stopSpeak(){_seqOn=false;if(synth)synth.cancel();document.querySelectorAll('.mini.playing').forEach(function(b){b.classList.remove('playing')})}
+/* 逐词慢放 ------------------------------------------------------------------
+   Chrome 的云端语音（Google US English 等，localService=false）常常直接忽略
+   utterance.rate，导致"0.6x 精听"听上去毫无变化。这里改用拆词 + 间隔的方式
+   放慢节奏——不依赖引擎的 rate 支持，任何语音上都真的能慢下来。 */
+var _seqOn=false,_seqGen=0;
+/* chunk：一次念几个词。1 = 逐词（最慢、最清楚）；3 = 三词一组（更自然）。
+   拆得越碎，间隔带来的"变慢"效果越明显，代价是略显机械。 */
+function speakSeq(text,btn,gap,rate,done,chunk){
+  if(!synth){toast('当前浏览器不支持朗读');return}
+  stopSpeak();
+  var ws=String(text).split(/\s+/).filter(Boolean),i=0;
+  var cn=Math.max(1,chunk||1),parts=[];
+  for(var a=0;a<ws.length;a+=cn)parts.push(ws.slice(a,a+cn).join(' '));
+  var gen=++_seqGen;              // 代际标记：cancel() 触发的残留 onend 不会污染新一轮
+  _seqOn=true;
+  var finish=function(){if(gen!==_seqGen)return;_seqOn=false;if(btn)btn.classList.remove('playing');if(done)done()};
+  var step=function(){
+    if(!_seqOn||gen!==_seqGen)return;
+    if(i>=parts.length){finish();return}
+    if(btn)btn.classList.add('playing');
+    var u=new SpeechSynthesisUtterance(parts[i++]);
+    var p=pickVoice();
+    u.lang=(p&&p.lang)||'en-US';
+    u.rate=rate||(S.set.rate>1?1:S.set.rate);
+    u.pitch=(S.set.pitch!=null?S.set.pitch:1);
+    if(p)try{u.voice=p}catch(e){}
+    u.onend=function(){if(_seqOn&&gen===_seqGen)setTimeout(step,gap||280)};
+    u.onerror=finish;
+    try{synth.speak(u)}catch(e){finish()}
+  };
+  step();
+}
 function hasSR(){return !!(window.SpeechRecognition||window.webkitSpeechRecognition)}
+var _srCur=null;
+function srAbort(){if(_srCur){try{_srCur.abort()}catch(e){}}_srCur=null}
+/* ---- 语音识别（多候选优选） ----------------------------------------------
+   浏览器返回的 transcript 常常不准，但它会同时给出多个候选（maxAlternatives）。
+   这里把每个候选都跟参考答案做一次 LCS 比对，取命中率最高的那个——
+   比无脑用第一个候选准得多，尤其在嘈杂环境或带口音时。 */
+function srListen(opt){
+  var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){if(opt.onErr)opt.onErr('当前浏览器不支持语音识别（建议用 Chrome / Edge）');return null}
+  var r=new SR();
+  r.lang=opt.lang||'en-US';
+  r.interimResults=false;r.continuous=false;r.maxAlternatives=5;
+  var settled=false;
+  r.onresult=function(e){
+    if(settled)return;settled=true;_srCur=null;
+    var alt=e.results[0],best='',bs=-1,bc=-1;
+    for(var i=0;i<alt.length;i++){
+      var t=alt[i].transcript||'';
+      if(opt.ref){
+        // 有参考答案（如背诵比对）：按与原文的匹配度挑最像的那个候选
+        var s=scoreSpeech(opt.ref,t).score;
+        if(s>bs){bs=s;best=t}
+      }else{
+        // 无参考答案（如听写、回译）：只按置信度挑，不拿原文去"引导"识别结果，
+        // 否则等于开卷，训练就没意义了
+        var c=(alt[i].confidence!=null?alt[i].confidence:0.5);
+        if(c>bc){bc=c;best=t;bs=Math.round(c*100)}
+      }
+    }
+    if(opt.onResult)opt.onResult(best,bs,alt.length);
+  };
+  r.onerror=function(e){
+    if(settled)return;settled=true;_srCur=null;
+    var m=e.error==='aborted'?'':
+          e.error==='not-allowed'?'麦克风权限被拒绝，请在浏览器地址栏允许':
+          e.error==='no-speech'?'没听到声音，再说一次':
+          e.error==='network'?'识别服务不可用（语音识别需要联网）':('识别失败：'+e.error);
+    if(m&&opt.onErr)opt.onErr(m);
+  };
+  r.onend=function(){if(!settled){settled=true;_srCur=null;if(opt.onErr)opt.onErr('没听到声音，再说一次')}};
+  try{r.start();_srCur=r}catch(e){if(opt.onErr)opt.onErr('无法启动录音')}
+  return r;
+}
+/* 把识别结果写进输入框（听写 / 回译用） */
+function srFill(fieldId,ref,btn){
+  var el=document.getElementById(fieldId);
+  if(!el){toast('输入框不存在');return}
+  if(btn)btn.classList.add('playing');
+  var done=function(){if(btn)btn.classList.remove('playing')};
+  srListen({
+    ref:ref||'',
+    onResult:function(t,s){
+      el.value=t.trim();done();
+      toast('识别完成'+(s>=0?'（匹配 '+s+'%）':''));
+    },
+    onErr:function(m){done();toast(m)}
+  });
+}
 
 /* 逐词比对打分（LCS） */
 function normWords(s){return String(s).toLowerCase().replace(/[^a-z0-9'\s]/g,' ').replace(/\s+/g,' ').trim().split(' ').filter(Boolean)}
@@ -2413,7 +2600,10 @@ function renderUnit(){
     else{
       rd.forEach(function(r,ri){
         var rdDone=S.read[r.id]&&S.read[r.id].done;
-        h+='<div class="reading"><div class="rhead"><span class="rbadge '+(r.kind==='email'?'em':'ar')+'">'+(r.kind==='email'?'应用邮件':'职场短文')+'</span><b>'+esc(r.title)+'</b>'+(rdDone?'<span class="pill suc">已读完</span>':'')+'</div>';
+        var dd=deepOf(r.id),dstep=deepStep(r.id);
+        h+='<div class="reading"><div class="rhead"><span class="rbadge '+(r.kind==='email'?'em':'ar')+'">'+(r.kind==='email'?'应用邮件':'职场短文')+'</span><b>'+esc(r.title)+'</b>'+
+          (dd.deepDone?'<span class="pill suc">四阶已榨干</span>':dstep?'<span class="pill wrn">精学 '+dstep+'/4</span>':'')+
+          (rdDone?'<span class="pill suc">已读完</span>':'')+'</div>';
         if(r.kind==='email'&&r.head){
           h+='<div class="remail"><div class="re"><span>收件</span>'+esc(r.head.to)+'</div><div class="re"><span>发件</span>'+esc(r.head.from)+'</div><div class="re"><span>主题</span>'+esc(r.head.subject)+'</div></div>';
         }
@@ -2422,6 +2612,9 @@ function renderUnit(){
           '<button class="mini" onclick="playSentences(document.getElementById(\'rbody'+ri+'\').innerText,this)">'+svg(I.play,'s')+'分句朗读</button>'+
           '<button class="mini g" onclick="playSentences(document.getElementById(\'rbody'+ri+'\').innerText,this,true)">0.6x 精听</button>'+
           '<button class="mini g" onclick="parsePassage('+ri+')">🔍 解析</button></div>';
+        h+='<div class="row" style="margin-top:6px">'+
+          '<button class="mini '+(dd.deepDone?'g':'')+'" onclick="openDeepRd('+ri+')">🎯 '+(dd.deepDone?'再榨一遍':'四阶精学这篇')+'</button>'+
+          '<span class="hint" style="flex:1;margin-left:6px">听写 → 精读 → 回译 → 背诵，整篇 '+alignSents(r.en,r.zh).filter(function(x){return x.en&&x.en.replace(/[^A-Za-z]/g,'').length>1}).length+' 句全过一遍</span></div>';
         h+='<button class="rzh-toggle" onclick="toggleRzh('+ri+')">'+svg(I.eye,'s')+'中文译文 ▾</button>';
         h+='<div class="rzh-body" id="rzh'+ri+'" style="display:none">'+esc(r.zh||'（本篇暂无中文译文）')+'</div>';
         h+='<div class="rhint">读完后做下面 '+(r.q?r.q.length:0)+' 道理解题检测理解：</div>';
@@ -2454,23 +2647,76 @@ function renderUnit(){
 /* ================= 精学四阶（尚雯婕法） ================= */
 var DEEP_TAB=[['dict','①','听写'],['read','②','精读'],['retro','③','回译'],['shadow','④','背诵']];
 var dictView={checked:false,res:null,val:''},retroView={checked:false,res:null,val:''};
-var shadowView={lv:0,t0:0,elapsed:0,on:false,show:false};
-function deepSet(u){return (u.spk&&u.spk.length)?u.spk:u.dlg.map(function(_,i){return i})}
-function deepReset(){dictView={checked:false,res:null,val:''};retroView={checked:false,res:null,val:''};shadowView={lv:0,t0:0,elapsed:0,on:false,show:false}}
+var shadowView={lv:0,t0:0,elapsed:0,on:false,mode:'',show:false,res:null};
+var deepRdOn=false,deepRdIdx=0;   /* 是否正在做「拓展阅读」某篇的四阶、哪一篇 */
+
+/* 统一句源：对话 = 全部句子；阅读 = 整篇分句（英汉对齐，支撑回译）。
+   注意这里取全篇而非精选句——四阶要覆盖整篇材料，不能只练 4 句。 */
+function deepSrc(){
+  if(deepRdOn&&curUnit){
+    var mod=COURSE.find(function(m){return m.id===curUnit.modId})||{};
+    var r=(mod.rd||[])[deepRdIdx];
+    if(!r)return null;
+    var items=alignSents(r.en,r.zh).filter(function(x){
+      return x.en&&x.en.replace(/[^A-Za-z]/g,'').length>1;});
+    return {kind:'read',id:r.id,title:r.title,items:items,r:r};
+  }
+  if(!curUnit)return null;
+  return {kind:'dlg',id:curUnit.id,title:curUnit.t,
+    items:curUnit.dlg.map(function(d){return {en:d.en,zh:d.zh,s:d.s}}),r:null};
+}
+function deepId(){var s=deepSrc();return s?s.id:(curUnit?curUnit.id:'')}
+function deepItems(){var s=deepSrc();return s?s.items:[]}
+function deepReset(){dictView={checked:false,res:null,val:''};retroView={checked:false,res:null,val:''};shadowView={lv:0,t0:0,elapsed:0,on:false,mode:'',show:false,res:null}}
 function deepSteps(u){
-  var d=deepOf(u.id),h='<div class="steps">';
+  var d=deepOf(deepId()),h='<div class="steps">',n=deepItems().length;
   DEEP_TAB.forEach(function(x){
     var dn=d[x[0]]?' done':'',on=deepTab===x[0]?' on':'';
     h+='<button class="step'+dn+on+'" onclick="switchDeep(\''+x[0]+'\')"><i>'+(d[x[0]]?'✓':x[1])+'</i><span>'+x[2]+'</span></button>';
   });
   h+='</div>';
+  var s=deepSrc();
+  if(deepRdOn&&s)h+='<div class="dphint" style="margin-bottom:9px">📖 正在精学阅读《'+esc(s.title)+'》· 全篇 <b>'+n+'</b> 句 · '+
+    '<button class="btn gh xs" onclick="closeDeepRd()">← 返回阅读</button></div>';
   if(d.deepDone)h+='<div class="deepdone">✓ 本篇四阶精学已完成 · '+d.ts+'</div>';
-  else h+='<div class="dphint">尚雯婕精学法：同一篇材料<b>榨干四遍</b>——盲听听写 → 对照精读 → 回译输出 → 同速背诵。四阶全绿计 1 篇精学，<b>累计 10 篇触发质变</b>。</div>';
+  else h+='<div class="dphint">尚雯婕精学法：同一篇材料<b>榨干四遍</b>——盲听听写 → 对照精读 → 回译输出 → 同速背诵。<b>覆盖全篇 '+n+' 句</b>，四阶全绿计 1 篇精学，<b>累计 10 篇触发质变</b>。</div>';
   return h;
 }
 function switchDeep(t){stopSpeak();deepTab=t;renderUnit();document.getElementById('upBody').scrollTop=0;}
-function deepDots(set,idx){
-  return '<div class="spkprog">'+set.map(function(_,i){return '<i class="'+(i<idx?'done':i===idx?'on':'')+'"></i>'}).join('')+'</div>';
+/* 进入 / 退出「拓展阅读」某篇的四阶 */
+function openDeepRd(ri){stopSpeak();srAbort();deepRdOn=true;deepRdIdx=ri;deepReset();deepTab='dict';curTab='dlg';renderUnit();document.getElementById('upBody').scrollTop=0}
+function closeDeepRd(){stopSpeak();srAbort();deepRdOn=false;deepReset();deepTab='read';curTab='read';renderUnit();document.getElementById('upBody').scrollTop=0}
+function deepDots(n,idx){
+  var h='<div class="spkprog">';
+  for(var i=0;i<n;i++)h+='<i class="'+(i<idx?'done':i===idx?'on':'')+'"></i>';
+  return h+'</div>';
+}
+/* 每阶走完后「再来一遍」：清进度与逐句得分，可反复练 */
+function deepAgain(key){
+  var d=deepOf(deepId());
+  if(key==='read')d.read=false;          /* 精读没有逐句进度，重来 = 清除完成标记重新吃透 */
+  d[key+'Idx']=0;d[key+'Hit']={};
+  if(key==='dict')dictView={checked:false,res:null,val:''};
+  else if(key==='retro')retroView={checked:false,res:null,val:''};
+  else if(key==='shadow')shadowView={lv:shadowView.lv,t0:0,elapsed:0,on:false,mode:'',show:shadowView.show,res:null};
+  save();renderUnit();toast('已重置，再来一遍');
+}
+function againBtn(key){
+  var t=key==='read'?'↻ 重新精读（清除完成标记）':'↻ 再来一遍';
+  return '<button class="btn out full" style="margin-top:9px" onclick="deepAgain(\''+key+'\')">'+t+'</button>';
+}
+/* 某阶全部走完后的收尾面板：平均/最佳分 + 再来一遍 */
+function deepFinish(key,name){
+  var d=deepOf(deepId()),items=deepItems(),hit=d[key+'Hit']||{},ks=Object.keys(hit);
+  var avg=ks.length?Math.round(ks.reduce(function(a,k){return a+(hit[k]||0)},0)/ks.length):0;
+  var best=ks.length?Math.max.apply(null,ks.map(function(k){return hit[k]||0})):0;
+  var ni=-1;DEEP_TAB.forEach(function(x,i){if(x[0]===key)ni=i});
+  var nx=ni>=0?DEEP_TAB[ni+1]:null;
+  var h='<div class="dphead"><b>'+name+'阶</b><span class="pill suc">已完成</span></div>'+
+    '<div class="deepdone">✓ 全篇 <b>'+items.length+'</b> 句已过完 · 本轮平均 <b>'+avg+'</b> 分 / 最佳 <b>'+best+'</b> 分（'+ks.length+' 句）</div>';
+  if(nx)h+='<button class="btn full" onclick="switchDeep(\''+nx[0]+'\')">下一步：'+nx[2]+' →</button>';
+  else h+='<div class="dphint">四阶都走完了，整篇才算<b>榨干</b>。想再巩固就点「再来一遍」。</div>';
+  return h+againBtn(key);
 }
 /* 词级比对着色 */
 function diffHtml(ref,marks){
@@ -2484,9 +2730,30 @@ function diffStat(r){
     '<div class="pl"><i style="width:'+r.score+'%;background:'+col+'"></i></div>'+
     '<div style="font-size:12px;color:var(--sub)">命中 '+r.hit+'/'+r.total+' 词</div></div>';
 }
-/* ---- ② 精读（原对话视图） ---- */
+/* ---- ② 精读：对话与阅读两种形态 ---- */
 function deepRead(u){
-  var d=deepOf(u.id);
+  var s=deepSrc();
+  if(s&&s.kind==='read')return deepReadArticle(s);
+  return deepReadDlg(u);
+}
+function deepReadArticle(s){
+  var r=s.r,d=deepOf(deepId());
+  var h='<div class="dpcard"><div class="dphead"><b>② 对照精读</b></div>'+
+    '<div class="dphint">通读全篇，再点 <b>🔍 解析全篇</b> 逐句拆结构；点生词可直接进词库。吃透全文后再进回译——回译练的是「用英文把这段说出来」。</div>'+
+    '<div class="dpsent hl-target" id="dprBody" data-cid="rd-'+deepRdIdx+'" style="font-size:15px;line-height:1.75">'+linkVoc(r.en,r.voc)+'</div>'+
+    '<div class="dpsent zh" style="margin-top:9px">'+esc(r.zh||'（本篇暂无中文译文）')+'</div>'+
+    '<div class="dprow">'+
+      '<button class="mini" onclick="playSentences(document.getElementById(\'dprBody\').innerText,this)">'+svg(I.play,'s')+'分句朗读</button>'+
+      '<button class="mini g" onclick="playSentences(document.getElementById(\'dprBody\').innerText,this,true)">🐢 逐词慢放</button>'+
+      '<button class="mini g" onclick="parsePassage('+deepRdIdx+')">🔍 解析全篇</button>'+
+      '<button class="mini g" onclick="stopSpeak()">停止</button></div></div>';
+  if(d.read)h+='<div class="deepdone">✓ 精读阶已完成</div>'+againBtn('read');
+  else h+='<button class="btn full" onclick="markDeep(\'read\');renderUnit()">'+svg(I.check,'s')+'吃透了，标记精读完成</button>';
+  h+='<button class="btn full out" style="margin-top:8px" onclick="closeDeepRd()">← 返回阅读</button>';
+  return h;
+}
+function deepReadDlg(u){
+  var d=deepOf(deepId());
   var h='<div class="scene"><b>场景说明</b>'+u.scene+'</div>';
   h+='<div class="toolbar">'+
     '<button class="mini" onclick="playAll(this)">'+svg(I.play,'s')+'连续播放全文</button>'+
@@ -2498,111 +2765,131 @@ function deepRead(u){
       '<div class="den hl-target" data-cid="dlg-'+i+'" id="den'+i+'">'+linkVoc(dd.en,u.voc)+'</div>'+
       '<div class="dzh'+(S.set.showZh?'':' hide')+'">'+esc(dd.zh)+'</div>'+
       '<div class="dbtns"><button class="mini" onclick="speak(this.dataset.x,this)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'朗读</button>'+
-      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.6)" data-x="'+esc(dd.en)+'">0.6x 精听</button>'+
+      '<button class="mini g" onclick="speakSeq(this.dataset.x,this,240,0.85,null,2)" data-x="'+esc(dd.en)+'">🐢 0.5x 慢放</button>'+
       '<button class="mini g" onclick="parseSentence(\''+escJs(dd.en)+'\',\''+escJs(dd.zh)+'\',curUnit.voc,null)">🔍 解析</button></div></div></div>';
   });
-  if(d.read)h+='<div class="deepdone">✓ 精读阶已完成</div>';
+  if(d.read)h+='<div class="deepdone">✓ 精读阶已完成</div>'+againBtn('read');
   else h+='<button class="btn full" style="margin-top:6px" onclick="markDeep(\'read\');renderUnit()">'+svg(I.check,'s')+'吃透了，标记精读完成</button>';
   h+='<button class="btn full '+(d.read?'':'out')+'" style="margin-top:8px" onclick="markStudied()">学完了，去读拓展阅读</button>';
   return h;
 }
+/* ---- 四阶公共：取当前句 / 播放条 / 收尾判定 ---- */
+function deepCur(key){
+  var d=deepOf(deepId()),items=deepItems();
+  var idx=Math.min(d[key+'Idx']||0,Math.max(0,items.length-1));
+  return {d:d,items:items,idx:idx,it:items[idx]||{en:'',zh:'',s:''}};
+}
+function deepEnded(d,key,items){return !!d[key]&&(d[key+'Idx']||0)>=items.length-1}
+/* 播放条：慢速一律走 speakSeq 逐词拆分 —— utterance.rate 在云端语音上会被忽略 */
+function deepPlayRow(en,extra){
+  var x=esc(en);
+  return '<div class="dprow">'+
+    '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+x+'">'+svg(I.vol,'s')+'正常速</button>'+
+    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,110,0.9,null,3)" data-x="'+x+'">0.8x</button>'+
+    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,240,0.85,null,2)" data-x="'+x+'">🐢 0.5x</button>'+
+    '<button class="mini g" onclick="speakSeq(this.dataset.x,this,480,0.8,null,1)" data-x="'+x+'">🐢🐢 极慢</button>'+
+    '<button class="mini g" onclick="stopSpeak()">停止</button></div>'+(extra||'');
+}
 /* ---- ① 听写 ---- */
 function deepDict(u){
-  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.dictIdx,set.length-1),dd=u.dlg[set[idx]];
-  var h='<div class="dpcard"><div class="dphead"><b>① 盲听听写</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
-    '<div class="dphint">不看原文，反复听这句，把听到的写下来。听不出先按发音拼，写完再核对——<b>这是整条方法里最硬的一环</b>。</div>'+
-    deepDots(set,idx)+
-    '<div class="dphint" style="margin-top:9px">说话人：'+esc(dd.s)+'</div>'+
-    '<div class="dprow">'+
-      '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'正常速</button>'+
-      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.8)" data-x="'+esc(dd.en)+'">0.8x</button>'+
-      '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.6)" data-x="'+esc(dd.en)+'">0.6x 慢速</button>'+
-      '<button class="mini g" onclick="dictReveal()">'+svg(I.eye,'s')+'看原文</button></div>';
+  var c=deepCur('dict'),d=c.d,items=c.items,idx=c.idx,it=c.it,n=items.length;
+  if(!n)return '<div class="empty">当前材料没有可练习的句子。</div>';
+  if(deepEnded(d,'dict',items))return '<div class="dpcard">'+deepFinish('dict','听写')+'</div>';
+  var h='<div class="dpcard"><div class="dphead"><b>① 盲听听写</b><span class="pill gray">'+(idx+1)+' / '+n+'</span></div>'+
+    '<div class="dphint">不看原文，反复听这句，把听到的写下来。听不出先按发音拼，写完再核对——<b>这是整条方法里最硬的一环</b>。全篇 <b>'+n+'</b> 句逐句过，不跳句。</div>'+
+    deepDots(n,idx)+
+    (it.s?'<div class="dphint" style="margin-top:9px">说话人：'+esc(it.s)+'</div>':'')+
+    deepPlayRow(it.en)+
+    '<div class="dprow"><button class="mini g" onclick="dictReveal()">'+svg(I.eye,'s')+'看原文</button></div>';
   if(!dictView.checked){
     h+='<textarea class="dpin" id="dictIn" style="margin-top:10px" placeholder="把你听到的写在这里…（忽略大小写和标点）">'+esc(dictView.val||'')+'</textarea>'+
-      '<div class="dprow"><button class="btn" style="flex:1" onclick="dictCheck()">'+svg(I.check,'s')+'核对</button></div>';
+      '<div class="dprow">'+
+      '<button class="btn" style="flex:1" onclick="dictCheck()">'+svg(I.check,'s')+'核对</button>'+
+      '<button class="btn out" onclick="srFill(\'dictIn\',null,this)">'+svg(I.mic,'s')+'语音输入</button></div>'+
+      '<div class="dphint">听写也可以<b>口头答</b>：点语音输入直接把听到的说出来。这里<b>不拿原文去纠正识别</b>（否则等于开卷），只按引擎置信度挑最准的候选。</div>';
   }else{
     var r=dictView.res||{score:0,marks:[],hit:0,total:0};
     h+=diffStat(r)+
-      '<div class="dpsent" style="margin-top:8px">'+diffHtml(dd.en,r.marks)+'</div>'+
-      '<div class="dpsent" style="margin-top:6px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">正确原文</b><br>'+esc(dd.en)+'</div>'+
-      '<div class="dpsent zh" style="margin-top:6px">'+esc(dd.zh)+'</div>';
-    if(r.score<100)h+='<div class="dpmiss">标红删除线 = 没听出来或写错的词。回 0.6x 再听两遍，重点抓<b>连读和弱读</b>。</div>';
+      '<div class="dpsent" style="margin-top:8px">'+diffHtml(it.en,r.marks)+'</div>'+
+      '<div class="dpsent" style="margin-top:6px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">正确原文</b><br>'+esc(it.en)+'</div>'+
+      (it.zh?'<div class="dpsent zh" style="margin-top:6px">'+esc(it.zh)+'</div>':'');
+    if(r.score<100)h+='<div class="dpmiss">标红 = 没听出来或写错的词。回「🐢 0.5x」再听两遍，重点抓<b>连读和弱读</b>。</div>';
     h+='<div class="dprow">'+
       '<button class="btn out" style="flex:1" onclick="dictAgain()">再听写一遍</button>'+
-      '<button class="btn" style="flex:1" onclick="dictNext()">'+(idx>=set.length-1?'完成听写阶':'下一句')+'</button></div>';
+      '<button class="btn" style="flex:1" onclick="dictNext()">'+(idx>=n-1?'完成听写阶':'下一句')+'</button></div>';
   }
   return h+'</div>';
 }
 function dictCheck(){
-  var u=curUnit,d=deepOf(u.id),set=deepSet(u),dd=u.dlg[set[Math.min(d.dictIdx,set.length-1)]];
-  var el=document.getElementById('dictIn');if(!el)return;
+  var c=deepCur('dict'),el=document.getElementById('dictIn');if(!el)return;
   var v=(el.value||'').trim();
   if(!v){toast('先写下你听到的内容');return}
-  var r=scoreSpeech(dd.en,v);
+  var r=scoreSpeech(c.it.en,v);
   dictView={checked:true,res:r,val:v};
-  setDeepHit('dictHit',set[Math.min(d.dictIdx,set.length-1)],r.score);
+  setDeepHit('dictHit',c.idx,r.score);
   renderUnit();
 }
 function dictAgain(){dictView={checked:false,res:null,val:''};renderUnit()}
 function dictReveal(){
-  var u=curUnit,d=deepOf(u.id),set=deepSet(u),dd=u.dlg[set[Math.min(d.dictIdx,set.length-1)]];
-  var m=normWords(dd.en).map(function(){return false});
+  var c=deepCur('dict'),m=normWords(c.it.en).map(function(){return false});
   dictView={checked:true,res:{score:0,marks:m,hit:0,total:m.length},val:''};
   renderUnit();
 }
 function dictNext(){
-  var d=deepOf(curUnit.id),set=deepSet(curUnit);
+  var c=deepCur('dict');
   dictView={checked:false,res:null,val:''};
-  if(d.dictIdx>=set.length-1){markDeep('dict');renderUnit();return}
-  d.dictIdx++;save();renderUnit();
+  if(c.idx>=c.items.length-1){markDeep('dict');renderUnit();return}
+  c.d.dictIdx=c.idx+1;save();renderUnit();
 }
 /* ---- ③ 回译 ---- */
 function deepRetro(u){
-  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.retroIdx,set.length-1),dd=u.dlg[set[idx]];
-  var h='<div class="dpcard"><div class="dphead"><b>③ 回译输出</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
-    '<div class="dphint">只看中文，把英文<b>说出来或写出来</b>。回译不要求逐字一致，按<b>实词命中率</b>评分——练的是「用英语表达」，专治看懂却说不出。</div>'+
-    deepDots(set,idx)+
-    '<div class="dpsent zh" style="margin-top:9px;font-size:15.5px">'+esc(dd.zh)+'</div>';
+  var c=deepCur('retro'),d=c.d,items=c.items,idx=c.idx,it=c.it,n=items.length;
+  if(!n)return '<div class="empty">当前材料没有可练习的句子。</div>';
+  if(deepEnded(d,'retro',items))return '<div class="dpcard">'+deepFinish('retro','回译')+'</div>';
+  var h='<div class="dpcard"><div class="dphead"><b>③ 回译输出</b><span class="pill gray">'+(idx+1)+' / '+n+'</span></div>'+
+    '<div class="dphint">只看中文，把英文<b>说出来或写出来</b>。回译不要求逐字一致，按<b>实词命中率</b>评分——练的是「用英语表达」，专治看懂却说不出。全篇 <b>'+n+'</b> 句逐句过。</div>'+
+    deepDots(n,idx)+
+    '<div class="dpsent zh" style="margin-top:9px;font-size:15.5px">'+(it.zh?esc(it.zh):'<i style="color:var(--sub)">（本句暂无中文译文，请直接看英文原文后复述）</i>')+'</div>';
   if(!retroView.checked){
-    h+='<textarea class="dpin" id="retroIn" style="margin-top:10px" placeholder="写出你的英文…">'+esc(retroView.val||'')+'</textarea>'+
-      '<div class="dprow"><button class="btn" style="flex:1" onclick="retroCheck()">'+svg(I.check,'s')+'对比原文</button>'+
-      '<button class="btn out" onclick="retroReveal()">想不出</button></div>';
+    h+='<textarea class="dpin" id="retroIn" style="margin-top:10px" placeholder="写出 / 说出你的英文…">'+esc(retroView.val||'')+'</textarea>'+
+      '<div class="dprow">'+
+      '<button class="btn" style="flex:1" onclick="retroCheck()">'+svg(I.check,'s')+'对比原文</button>'+
+      '<button class="btn out" onclick="srFill(\'retroIn\',\''+escJs(it.en)+'\',this)">'+svg(I.mic,'s')+'语音输入</button>'+
+      '<button class="btn out" onclick="retroReveal()">想不出</button></div>'+
+      '<div class="dphint">语音输入会用<b>参考表达</b>在引擎给的多个候选里挑最接近的，专治同音误识（如 fifteen / fifty）。<b>但分怎么算，仍按你实际说出来的内容</b>。</div>';
   }else{
     var r=retroView.res||{score:0,hit:0,total:0};
     h+=diffStat(r)+
-      '<div class="dpsent" style="margin-top:8px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">参考答案</b><br>'+esc(dd.en)+'</div>';
+      '<div class="dpsent" style="margin-top:8px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">参考答案</b><br>'+esc(it.en)+'</div>';
     if(retroView.val)h+='<div class="dpsent" style="margin-top:6px"><b style="font-size:11.5px;color:var(--sub)">你的版本</b><br>'+esc(retroView.val)+'</div>';
-    h+='<div class="dpsent zh" style="margin-top:6px">'+esc(dd.zh)+'</div>'+
+    h+=(it.zh?'<div class="dpsent zh" style="margin-top:6px">'+esc(it.zh)+'</div>':'')+
       '<div class="dpmiss">命中率看的是<b>实词和句型</b>，冠词介词不同不影响。低于 60% 说明这句的<b>句式</b>还没内化，回去按成分拆一遍。</div>'+
       '<div class="dprow">'+
       '<button class="btn out" style="flex:1" onclick="retroAgain()">再译一次</button>'+
-      '<button class="btn" style="flex:1" onclick="retroNext()">'+(idx>=set.length-1?'完成回译阶':'下一句')+'</button></div>';
+      '<button class="btn" style="flex:1" onclick="retroNext()">'+(idx>=n-1?'完成回译阶':'下一句')+'</button></div>';
   }
   return h+'</div>';
 }
 function retroCheck(){
-  var d=deepOf(curUnit.id),set=deepSet(curUnit),dd=curUnit.dlg[set[Math.min(d.retroIdx,set.length-1)]];
-  var el=document.getElementById('retroIn');if(!el)return;
+  var c=deepCur('retro'),el=document.getElementById('retroIn');if(!el)return;
   var v=(el.value||'').trim();
   if(!v){toast('先写出你的英文');return}
-  var r=scoreSpeech(dd.en,v);
+  var r=scoreSpeech(c.it.en,v);
   retroView={checked:true,res:r,val:v};
-  setDeepHit('retroHit',set[Math.min(d.retroIdx,set.length-1)],r.score);
+  setDeepHit('retroHit',c.idx,r.score);
   renderUnit();
 }
 function retroReveal(){
-  var dd=curUnit.dlg[deepSet(curUnit)[Math.min(deepOf(curUnit.id).retroIdx,deepSet(curUnit).length-1)]];
-  var m=normWords(dd.en).map(function(){return false});
+  var c=deepCur('retro'),m=normWords(c.it.en).map(function(){return false});
   retroView={checked:true,res:{score:0,marks:m,hit:0,total:m.length},val:''};
   renderUnit();
 }
 function retroAgain(){retroView={checked:false,res:null,val:''};renderUnit()}
 function retroNext(){
-  var d=deepOf(curUnit.id),set=deepSet(curUnit);
+  var c=deepCur('retro');
   retroView={checked:false,res:null,val:''};
-  if(d.retroIdx>=set.length-1){markDeep('retro');renderUnit();return}
-  d.retroIdx++;save();renderUnit();
+  if(c.idx>=c.items.length-1){markDeep('retro');renderUnit();return}
+  c.d.retroIdx=c.idx+1;save();renderUnit();
 }
 /* ---- ④ 同速背诵 ---- */
 function shadowHtml(en,lv){
@@ -2615,50 +2902,102 @@ function shadowHtml(en,lv){
   }).join(' ');
 }
 function deepShadow(u){
-  var d=deepOf(u.id),set=deepSet(u),idx=Math.min(d.shadowIdx,set.length-1),dd=u.dlg[set[idx]];
-  var ref=Math.max(2,Math.round(normWords(dd.en).length/2.5));
-  var h='<div class="dpcard"><div class="dphead"><b>④ 同速背诵</b><span class="pill gray">'+(idx+1)+' / '+set.length+'</span></div>'+
-    '<div class="dphint">遮住英文，跟原音<b>同速</b>复述。尚雯婕心法：<b>速度 = 语感</b>——只有同速才算真正内化。本句参考时长约 <b>'+ref+' 秒</b>。</div>'+
-    deepDots(set,idx);
+  var c=deepCur('shadow'),d=c.d,items=c.items,idx=c.idx,it=c.it,n=items.length;
+  if(!n)return '<div class="empty">当前材料没有可练习的句子。</div>';
+  if(deepEnded(d,'shadow',items))return '<div class="dpcard">'+deepFinish('shadow','背诵')+'</div>';
+  var ref=Math.max(2,Math.round(normWords(it.en).length/2.5));
+  var h='<div class="dpcard"><div class="dphead"><b>④ 同速背诵</b><span class="pill gray">'+(idx+1)+' / '+n+'</span></div>'+
+    '<div class="dphint">遮住英文，跟原音<b>同速</b>复述。尚雯婕心法：<b>速度 = 语感</b>——只有同速才算真正内化。本句参考时长约 <b>'+ref+' 秒</b>，全篇 <b>'+n+'</b> 句。</div>'+
+    deepDots(n,idx);
   if(shadowView.show){
-    h+='<div class="dpsent" style="margin-top:9px;font-size:15.5px">'+esc(dd.en)+'</div>';
+    h+='<div class="dpsent" style="margin-top:9px;font-size:15.5px">'+esc(it.en)+'</div>';
   }else{
-    h+='<div class="dpsent" style="margin-top:9px"><div class="shd">'+shadowHtml(dd.en,shadowView.lv)+'</div></div>';
+    h+='<div class="dpsent" style="margin-top:9px"><div class="shd">'+shadowHtml(it.en,shadowView.lv)+'</div></div>';
   }
   h+='<div class="shdlv">'+
-    ['首字母','首词','全遮'].map(function(n,i){
-      return '<button class="mini '+(shadowView.lv===i?'':'g')+'" onclick="shadowLv('+i+')">'+n+'</button>'}).join('')+
+    ['首字母','首词','全遮'].map(function(x,i){
+      return '<button class="mini '+(shadowView.lv===i?'':'g')+'" onclick="shadowLv('+i+')">'+x+'</button>'}).join('')+
     '</div>'+
-    '<div class="dprow">'+
-    '<button class="mini" onclick="speak(this.dataset.x,this,null,1)" data-x="'+esc(dd.en)+'">'+svg(I.vol,'s')+'原速播放</button>'+
-    '<button class="mini g" onclick="speak(this.dataset.x,this,null,0.75)" data-x="'+esc(dd.en)+'">0.75x</button>'+
-    '<button class="mini g" onclick="shadowShow()">'+svg(I.eye,'s')+(shadowView.show?'遮回去':'看原文')+'</button></div>';
-  if(!shadowView.on&&!shadowView.elapsed){
-    h+='<div class="dprow"><button class="btn" style="flex:1" onclick="shadowStart()">'+svg(I.mic,'s')+'开始背诵（计时）</button></div>';
-  }else if(shadowView.on){
-    h+='<div class="shdtimer">⏱ 背诵中… 说完点下面结束</div>'+
-      '<div class="dprow"><button class="btn out" style="flex:1" onclick="shadowStop()">我背完了</button></div>';
+    deepPlayRow(it.en,
+      '<div class="dprow"><button class="mini g" onclick="shadowShow()">'+svg(I.eye,'s')+(shadowView.show?'遮回去':'看原文')+'</button></div>');
+  if(shadowView.on){
+    if(shadowView.mode==='rec'){
+      h+='<div class="shdtimer">🎤 正在听你背… 说完停一下即可自动比对</div>'+
+        '<div class="dprow"><button class="btn out" style="flex:1" onclick="shadowCancel()">取消</button></div>';
+    }else{
+      h+='<div class="shdtimer">⏱ 背诵中… 说完点下面结束</div>'+
+        '<div class="dprow"><button class="btn out" style="flex:1" onclick="shadowStop()">我背完了</button></div>';
+    }
+  }else if(shadowView.res){
+    var r=shadowView.res,e=shadowView.elapsed||0,diff=e-ref,ok=Math.abs(diff)<=ref*0.35;
+    h+=diffStat(r)+
+      '<div class="dpsent" style="margin-top:8px">'+diffHtml(it.en,r.marks)+'</div>'+
+      '<div class="dpsent" style="margin-top:6px;background:#fff"><b style="font-size:11.5px;color:var(--sub)">识别到的你</b><br>'+esc(r.text||'—')+'</div>'+
+      '<div class="shdtimer">用时 <b>'+e.toFixed(1)+'</b> 秒 · 参考 '+ref+' 秒 · '+
+        (ok?'<span style="color:var(--suc)">节奏接近原速 ✓</span>':diff>0?'<span style="color:var(--wrn)">偏慢，再跟一遍找速度</span>':'<span style="color:var(--wrn)">偏快，注意别吞音</span>')+'</div>'+
+      '<div class="dpmiss">识别引擎对<b>连读、弱读、生僻人名</b>容易误识。若你觉得自己念得挺顺但分很低，用下面的<b>手动评分</b>覆盖它。</div>'+
+      '<div class="dprow">'+
+      '<button class="btn out" style="flex:1" onclick="shadowRedo()">再背一次</button>'+
+      '<button class="btn" style="flex:1" onclick="shadowAdvance('+r.score+')">'+(idx>=n-1?'完成背诵阶':'采用 '+r.score+' 分 · 下一句')+'</button></div>'+
+      shadowManualRow();
+  }else if(shadowView.elapsed){
+    var e2=shadowView.elapsed,d2=e2-ref,ok2=Math.abs(d2)<=ref*0.35;
+    h+='<div class="shdtimer">你用了 <b>'+e2.toFixed(1)+'</b> 秒 · 参考 '+ref+' 秒 · '+
+      (ok2?'<span style="color:var(--suc)">节奏接近原速 ✓</span>':d2>0?'<span style="color:var(--wrn)">偏慢，再跟一遍找速度</span>':'<span style="color:var(--wrn)">偏快，注意别吞音</span>')+'</div>'+
+      shadowManualRow();
   }else{
-    var e=shadowView.elapsed,diff=e-ref,ok=Math.abs(diff)<=ref*0.35;
-    h+='<div class="shdtimer">你用了 <b>'+e.toFixed(1)+'</b> 秒 · 参考 '+ref+' 秒 · '+
-      (ok?'<span style="color:var(--suc)">节奏接近原速 ✓</span>':diff>0?'<span style="color:var(--wrn)">偏慢，再跟一遍找速度</span>':'<span style="color:var(--wrn)">偏快，注意别吞音</span>')+'</div>';
-    h+='<div class="dphint" style="margin-top:10px;text-align:center">给自己打个分：</div>'+
-      '<div class="row wrap" style="justify-content:center">'+
-      [['脱稿流利',95],['基本顺',80],['磕巴',65],['说不出',40]].map(function(x){
-        return '<button class="btn out sm" onclick="shadowScore('+x[1]+')">'+x[0]+'</button>'}).join('')+'</div>';
+    h+='<div class="dprow">'+
+      (hasSR()?'<button class="btn" style="flex:1" onclick="shadowRec()">'+svg(I.mic,'s')+'背诵并识别（自动比对）</button>':'')+
+      '<button class="btn '+(hasSR()?'out':'')+'" style="flex:1" onclick="shadowStart()">⏱ 只计时，自评</button></div>'+
+      (hasSR()?'<div class="dphint">推荐用「背诵并识别」：说完自动与原文<b>逐词比对</b>，绿色=说对，红色=漏词或错词。</div>'
+              :'<div class="dphint">当前浏览器不支持语音识别（建议 Chrome / Edge 桌面版，且需联网），只能用计时自评模式。</div>');
   }
   return h+'</div>';
 }
+function shadowManualRow(){
+  return '<div class="dphint" style="margin-top:10px;text-align:center">手动评分（覆盖识别分）：</div>'+
+    '<div class="row wrap" style="justify-content:center">'+
+    [['脱稿流利',95],['基本顺',80],['磕巴',65],['说不出',40]].map(function(x){
+      return '<button class="btn out sm" onclick="shadowAdvance('+x[1]+')">'+x[0]+'</button>'}).join('')+'</div>';
+}
 function shadowLv(i){shadowView.lv=i;renderUnit()}
 function shadowShow(){shadowView.show=!shadowView.show;renderUnit()}
-function shadowStart(){shadowView.on=true;shadowView.t0=Date.now();renderUnit()}
-function shadowStop(){shadowView.on=false;shadowView.elapsed=(Date.now()-shadowView.t0)/1000;renderUnit()}
-function shadowScore(s){
-  var d=deepOf(curUnit.id),set=deepSet(curUnit);
-  setDeepHit('shadowHit',set[Math.min(d.shadowIdx,set.length-1)],s);
-  shadowView.elapsed=0;
-  if(d.shadowIdx>=set.length-1){markDeep('shadow');renderUnit();return}
-  d.shadowIdx++;save();renderUnit();
+function shadowStart(){shadowView.on=true;shadowView.mode='timer';shadowView.t0=Date.now();shadowView.res=null;shadowView.elapsed=0;renderUnit()}
+function shadowStop(){shadowView.on=false;shadowView.mode='';shadowView.elapsed=(Date.now()-shadowView.t0)/1000;renderUnit()}
+function shadowCancel(){srAbort();shadowView.on=false;shadowView.mode='';shadowView.t0=0;shadowView.elapsed=0;shadowView.res=null;renderUnit()}
+function shadowRedo(){srAbort();shadowView={lv:shadowView.lv,t0:0,elapsed:0,on:false,mode:'',show:shadowView.show,res:null};renderUnit()}
+/* 背诵并识别：计时 + 语音识别同步开始，说完自动与原文 LCS 比对 */
+function shadowRec(){
+  var c=deepCur('shadow'),ref=c.it.en;
+  if(!hasSR()){toast('当前浏览器不支持语音识别');shadowStart();return}
+  stopSpeak();
+  shadowView={lv:shadowView.lv,t0:Date.now(),elapsed:0,on:true,mode:'rec',show:shadowView.show,res:null};
+  renderUnit();
+  srListen({
+    ref:ref,
+    onResult:function(t){
+      var r=scoreSpeech(ref,t);r.text=t;
+      shadowView.on=false;shadowView.mode='';
+      shadowView.elapsed=(Date.now()-shadowView.t0)/1000;
+      shadowView.res=r;
+      renderUnit();
+    },
+    onErr:function(m){
+      shadowView.on=false;shadowView.mode='';
+      shadowView.elapsed=(Date.now()-shadowView.t0)/1000;
+      shadowView.res=null;
+      renderUnit();
+      if(m)toast(m+'（已切到自评模式）');
+    }
+  });
+}
+function shadowAdvance(s){
+  var c=deepCur('shadow');
+  srAbort();
+  setDeepHit('shadowHit',c.idx,s);
+  shadowView={lv:shadowView.lv,t0:0,elapsed:0,on:false,mode:'',show:shadowView.show,res:null};
+  if(c.idx>=c.items.length-1){markDeep('shadow');renderUnit();return}
+  c.d.shadowIdx=c.idx+1;save();renderUnit();
 }
 function switchTab(t){
   if(t==='read')readAns={};
@@ -2700,7 +3039,9 @@ function playSentences(text,btn,slow){
   (function next(){
     if(i>=sents.length){if(btn)btn.classList.remove('playing');return}
     var txt=sents[i++];
-    speak(txt,null,function(){setTimeout(next,300);},slow?0.6:undefined);
+    /* 慢放不能靠 utterance.rate —— 云端语音会直接忽略它。改用逐词拆分 + 间隔。 */
+    if(slow)speakSeq(txt,btn,190,0.85,function(){setTimeout(next,400)},2);
+    else speak(txt,null,function(){setTimeout(next,300);});
   })();
 }
 /* 整篇阅读逐句解析（详细版：主干 + 时态语态 + 成分 + 关键词汇角色） */
@@ -3541,6 +3882,7 @@ document.addEventListener('keydown',function(e){
 });
 if(synth)synth.onvoiceschanged=function(){};
 load();
+initVoices();   /* 预热语音列表：首次 getVoices() 常为空，提前抓几次避免落到机械的默认语音 */
 setTimeout(function(){render();},0);
 </script>
 </body>
